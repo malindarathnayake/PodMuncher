@@ -2011,7 +2011,7 @@
   },
   "python_lock": {
    "file": "requirements.lock",
-   "sha256": "2547db715eb4bd95a84aebe0b81ef23e6d3104038fcafbab7d275a1c6c02cbb2",
+   "sha256": "701ba58fd47ee4b7276fb9beeee4f6abc3d016483ca745dc7909be31591bcd8f",
    "packages": [
     {
      "name": "aiohappyeyeballs",
@@ -2052,6 +2052,13 @@
      "name": "colorama",
      "version": "0.4.6",
      "license": "BSD License",
+     "license_source": "Classifier",
+     "scope": "development"
+    },
+    {
+     "name": "editables",
+     "version": "0.5",
+     "license": "MIT License",
      "license_source": "Classifier",
      "scope": "development"
     },
