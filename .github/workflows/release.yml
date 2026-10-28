@@ -444,6 +444,7 @@ jobs:
           NAMESPACE: ${{ needs.config.outputs.namespace }}
           PLATFORM: ${{ matrix.platform }}
         run: |
+          mkdir -p release-evidence/sbom release-evidence/vuln
           python tests/test_release_gates.py pull-verify --manifest src/podmuncher/manifests/release.json \
             --namespace "$NAMESPACE" --platform "$PLATFORM" --published published/media.json \
             --evidence release-evidence/verify --github-output "$GITHUB_OUTPUT"
@@ -531,6 +532,7 @@ jobs:
         env:
           NAMESPACE: ${{ needs.config.outputs.namespace }}
         run: |
+          mkdir -p release-evidence/sbom release-evidence/vuln
           python tests/test_release_gates.py pull-verify --manifest src/podmuncher/manifests/release.json \
             --namespace "$NAMESPACE" --platform linux-amd64 --published published/asr_cuda.json \
             --evidence release-evidence/verify --github-output "$GITHUB_OUTPUT"
