@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-28
+
 Podmuncher now works end to end on Windows and on macOS with Apple Silicon: a local service, command line, guided setup and terminal dashboard download and transcribe local files, direct HTTPS links and YouTube videos inside Docker containers. CUDA transcription has been measured on an NVIDIA GPU. Release images are built for linux/amd64 and linux/arm64 and are published only by the GitHub release workflow; until the first published release, the packaged release manifest lists what is still missing.
 
 ### Added

@@ -23,6 +23,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
+from packaging.version import Version
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOCK_PATH = PROJECT_ROOT / "requirements.lock"
@@ -127,7 +128,7 @@ def assert_wheel_policy(report: dict) -> None:
     metadata = report["metadata"]
     assert metadata["License-Expression"] == ["Apache-2.0"]
     assert metadata["Requires-Python"] == ["<3.15,>=3.12"]
-    assert metadata["Version"] == ["0.1.0.dev0"]
+    assert metadata["Version"] == ["1.0.0"]
     assert "[console_scripts]" in report["entry_points"]
     assert "podmuncher = podmuncher:main" in report["entry_points"]
 
@@ -224,7 +225,8 @@ def test_metadata_policy_has_no_unresolved_release_claims():
     assert project["license-files"] in ([], ["LICENSE"])
     assert project["requires-python"] == ">=3.12,<3.15"
     assert project["scripts"] == {"podmuncher": "podmuncher:main"}
-    assert ".dev" in project["version"], "only development wheels until release manifests exist"
+    version = Version(project["version"])
+    assert version.local is None, project["version"]
     classifiers = set(project["classifiers"])
     assert {f"Programming Language :: Python :: 3.{minor}" for minor in (12, 13, 14)} \
         <= classifiers
@@ -258,7 +260,7 @@ def test_forbidden_member_policy_examples():
                 "podmuncher/__pycache__/cli.cpython-312.pyc"):
         assert forbidden_member(bad), bad
     for good in (*WHEEL_ASSETS, "podmuncher/model_cache.py", "podmuncher/manifests/release.json",
-                 "podmuncher-0.1.0.dev0.dist-info/METADATA"):
+                 "podmuncher-1.0.0.dist-info/METADATA"):
         assert not forbidden_member(good), good
 
 
@@ -397,7 +399,7 @@ def test_clean_install_smoke_outside_checkout():
              f"heavy = sorted(n for n in sys.modules if n.split('.')[0] in {HEAVY_MODULES!r})\n"
              "assert not heavy, heavy")],
             cwd=cwd, env=env, timeout=60, what="lightweight import check")
-        assert light.stdout.strip() == "podmuncher 0.1.0.dev0"
+        assert light.stdout.strip() == "podmuncher 1.0.0"
 
         state = work / "state"
         status_env = make_clean_env(home, PODMUNCHER_STATE_DIR=str(state))

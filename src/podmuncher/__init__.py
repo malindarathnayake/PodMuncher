@@ -1,6 +1,11 @@
 """Podmuncher package and lightweight command entry point."""
 
-__version__ = "0.1.0.dev0"
+from importlib import metadata as _metadata
+
+try:
+    __version__ = _metadata.version("podmuncher")
+except _metadata.PackageNotFoundError:  # worker images copy the source without installing it
+    __version__ = "0+unknown"
 __all__ = ["__version__", "main"]
 
 

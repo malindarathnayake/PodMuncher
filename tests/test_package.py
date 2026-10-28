@@ -92,7 +92,7 @@ def test_package_metadata_policy():
     metadata = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     project = metadata["project"]
     assert project["name"] == "podmuncher"
-    assert project["version"] == podmuncher.__version__ == "0.1.0.dev0"
+    assert project["version"] == podmuncher.__version__
     assert project["requires-python"] == ">=3.12,<3.15"
     assert project["license"] == "Apache-2.0"
     assert metadata["build-system"]["build-backend"] == "hatchling.build"
@@ -146,3 +146,20 @@ def test_source_entrypoint_from_isolated_directory(argument, tmp_path):
     assert "podmuncher" in result.stdout
     assert result.stderr == ""
     assert list(tmp_path.iterdir()) == []
+
+
+def test_version_falls_back_when_package_metadata_is_missing(monkeypatch):
+    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    import importlib.metadata as metadata
+
+    def missing(name):
+        raise metadata.PackageNotFoundError(name)
+
+    try:
+        monkeypatch.setattr(metadata, "version", missing)
+        importlib.reload(podmuncher)
+        assert podmuncher.__version__ == "0+unknown"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(podmuncher)
+    assert podmuncher.__version__ == pyproject["project"]["version"]
