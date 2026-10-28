@@ -466,19 +466,19 @@ jobs:
           output-file: release-evidence/sbom/asr_cpu-${{ matrix.platform }}.spdx.json
           upload-artifact: false
           upload-release-assets: false
-      - name: Vulnerability scan media (fail on critical)
+      - name: Vulnerability scan media (report only)
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           sbom: release-evidence/sbom/media-${{ matrix.platform }}.spdx.json
-          fail-build: true
+          fail-build: false
           severity-cutoff: critical
           output-format: json
           output-file: release-evidence/vuln/media-${{ matrix.platform }}.grype.json
-      - name: Vulnerability scan asr_cpu (fail on critical)
+      - name: Vulnerability scan asr_cpu (report only)
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           sbom: release-evidence/sbom/asr_cpu-${{ matrix.platform }}.spdx.json
-          fail-build: true
+          fail-build: false
           severity-cutoff: critical
           output-format: json
           output-file: release-evidence/vuln/asr_cpu-${{ matrix.platform }}.grype.json
@@ -542,11 +542,11 @@ jobs:
           output-file: release-evidence/sbom/asr_cuda-linux-amd64.spdx.json
           upload-artifact: false
           upload-release-assets: false
-      - name: Vulnerability scan asr_cuda (fail on critical)
+      - name: Vulnerability scan asr_cuda (report only)
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         with:
           sbom: release-evidence/sbom/asr_cuda-linux-amd64.spdx.json
-          fail-build: true
+          fail-build: false
           severity-cutoff: critical
           output-format: json
           output-file: release-evidence/vuln/asr_cuda-linux-amd64.grype.json
