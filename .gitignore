@@ -85,3 +85,6 @@ Docs/podmuncher-requirements.txt
 Docs/podmuncher-branding-prompt.txt
 Docs/diagrams/podmuncher.mmd
 .playwright-mcp/
+
+# Release-candidate scratch output (identity files, build logs)
+.rc/
