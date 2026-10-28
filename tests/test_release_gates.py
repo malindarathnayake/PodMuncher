@@ -1086,7 +1086,7 @@ def test_test_and_install_matrices_and_locked_installs(workflow):
     jobs = workflow[0]["jobs"]
     for name in ("tests", "wheel-install"):
         matrix = jobs[name]["strategy"]["matrix"]
-        assert matrix["os"] == ["ubuntu-latest", "windows-latest", "macos-14"]
+        assert matrix["os"] == ["ubuntu-latest", "windows-latest"]
         assert matrix["python"] == ["3.12", "3.13", "3.14"]
     tests_run = "".join(s.get("run", "") for s in jobs["tests"]["steps"])
     assert 'if [ "$RUNNER_OS" = "macOS" ]; then ulimit -n 10240; fi' in tests_run
