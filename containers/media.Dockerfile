@@ -4,15 +4,15 @@
 # Build from the repository root:
 #   docker build -f containers/media.Dockerfile -t podmuncher-media:dev-local .
 #
-# Multi-arch: linux/amd64 and linux/arm64 (Apple Silicon). The base digest is a multi-arch
-# index, the pinned Debian FFmpeg exists for both, and every pip pin carries one sha256 per
+# Multi-arch: linux/amd64 and linux/arm64 (Apple Silicon). The base digest (python:3.12.15-slim-trixie)
+# and the static FFmpeg image are multi-arch indexes, and every pip pin carries one sha256 per
 # architecture-specific wheel (pure-Python wheels have one). Add --platform to cross-build.
 #
 # The host runs this image read-only as 65532:65532 with the entrypoint
 # ('python', '-I', '-m', 'podmuncher.media_worker'); -I ignores PYTHONPATH, so the
 # podmuncher modules are installed into site-packages below. No secrets, no ARG
 # tokens, no cookies, and nothing here is fetched at runtime.
-FROM python@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
+FROM python@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704
 
 LABEL org.opencontainers.image.title="podmuncher-media" \
       podmuncher.dev="1"
@@ -21,11 +21,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# FFmpeg and ffprobe from Debian trixie main (pinned exact package version).
+# Debian security fixes newer than the base image.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg=7:7.1.5-0+deb13u1 \
- && rm -rf /var/lib/apt/lists/* \
- && ffprobe -version
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/*
+
+# Static FFmpeg and ffprobe (mwader/static-ffmpeg 9.0.2-1, multi-arch index pinned by digest).
+# Debian's ffmpeg carries unfixed critical CVEs and pulls in libtiff/libxml2/X11 libraries.
+COPY --from=mwader/static-ffmpeg@sha256:f5d100184884eb3e82b0eb14bb5ebf98da99826ac824989720297fb9ef21c822 \
+     /ffmpeg /ffprobe /usr/local/bin/
+RUN ffprobe -version
 
 # Hash-pinned Python dependencies; --no-deps because every needed package is listed.
 # deno 2.9.5 is the version yt-dlp's own pin-deno extra pins; yt-dlp-ejs supplies the

@@ -1354,11 +1354,11 @@ def test_both_targets_exist_and_share_the_pinned_base():
     stages = {m.group(2): m.group(1) for line in lines
               if (m := re.match(r'FROM (\S+) AS (\w+)\Z', line))}
     assert set(stages) == {'base', 'cpu', 'cuda'}
-    assert stages['base'] == 'python@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f'
+    assert stages['base'] == 'python@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704'
     assert stages['cpu'] == stages['cuda'] == 'base'
     assert lines[0] == '# syntax=docker/dockerfile:1'
     assert not any(re.match(r'(?i)(ADD|ARG)\s', line) for line in lines)
-    assert 'apt-get' not in DOCKERFILE.read_text(encoding='utf-8').replace('# ', '')
+    assert 'apt-get install' not in DOCKERFILE.read_text(encoding='utf-8').replace('# ', '')
 
 
 def test_every_pip_requirement_is_exact_and_hashed():
