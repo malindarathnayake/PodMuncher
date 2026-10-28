@@ -16,8 +16,7 @@
 # manifest_sha256 before copying, building or uploading anything.
 #
 # Configuration (repository variables or workflow_dispatch inputs; no other secrets):
-#   PODMUNCHER_PUBLISHER_NAMESPACE           ghcr.io namespace (must be the repository owner).
-#                                            Without it the publish jobs fail closed.
+#   PODMUNCHER_PUBLISHER_NAMESPACE           ghcr.io namespace (defaults to the repository owner).
 #   PODMUNCHER_NVIDIA_REDISTRIBUTION_REVIEWED "true" only after the owner has reviewed the
 #                                            NVIDIA cuBLAS/cuDNN/NVRTC redistribution terms.
 # The asr_cuda image is published only when that review is recorded AND release.json
@@ -175,7 +174,7 @@ jobs:
           REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
           if [ "$EVENT_NAME" = "push" ]; then VERSION="${REF_NAME#v}"; else VERSION="$VERSION_INPUT"; fi
-          NAMESPACE="${NAMESPACE_INPUT:-$NAMESPACE_VARIABLE}"
+          NAMESPACE="${NAMESPACE_INPUT:-${NAMESPACE_VARIABLE:-$REPOSITORY_OWNER}}"
           python tests/test_release_gates.py gate \
             --manifest src/podmuncher/manifests/release.json \
             --namespace "$NAMESPACE" --owner "$REPOSITORY_OWNER" --version "$VERSION" \
