@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import sysconfig
 import threading
 import time
 import types
@@ -39,9 +40,9 @@ from podmuncher.domains import (
 from podmuncher.service import ClientError
 
 ROOT = Path(__file__).resolve().parents[1]
-# The repo venv's console script: ``Scripts\podmuncher.exe`` on Windows, ``bin/podmuncher`` on
-# POSIX (the Mac test venv is installed with ``uv pip install -e .``).
-CONSOLE = ROOT / ".venv" / ("Scripts" if os.name == "nt" else "bin") / (
+# The running interpreter's console script: its script directory (``sysconfig`` ``scripts``) names
+# a venv and a system install alike (``podmuncher.exe`` on Windows, ``podmuncher`` on POSIX).
+CONSOLE = Path(sysconfig.get_path("scripts")) / (
     "podmuncher.exe" if os.name == "nt" else "podmuncher")
 MODEL_BYTES = b"synthetic model fixture"
 DIGEST = "sha256:" + "1" * 64

@@ -660,7 +660,7 @@ def test_posix_without_pidfd_still_revalidates_creation_identity():
 
 def test_linux_pidfd_route_is_unchanged(monkeypatch):
     sent, opened = [], []
-    monkeypatch.setattr(os, 'pidfd_open', lambda pid: opened.append(pid) or 77, raising=False)
+    monkeypatch.setattr(os, 'pidfd_open', lambda pid, *_flags: opened.append(pid) or 77, raising=False)
     monkeypatch.setattr(_runtime_module.signal, 'pidfd_send_signal',
                         lambda fd, sig: sent.append((fd, sig)), raising=False)
     process = _OwnedPopen()

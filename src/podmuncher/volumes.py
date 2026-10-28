@@ -51,6 +51,7 @@ class HandleInfo:
     regular: bool
     links: int
     reparse: bool = False
+    stamp: tuple = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +135,10 @@ class HeldPath:
     def identity(self) -> FileIdentity:
         _ = self.handle  # Raises when closed or empty.
         return self._chain[-1][1].identity
+
+    def stamp(self) -> tuple:
+        """Change stamp of the held file now (size and times); never part of identity."""
+        return self._adapter.info(self.handle).stamp
 
     @property
     def closed(self) -> bool:
@@ -425,7 +430,8 @@ class PosixAdapter:
         s = self.os.fstat(handle)
         return HandleInfo(FileIdentity(f'posix:{s.st_dev}', str(s.st_ino)),
                           stat.S_ISDIR(s.st_mode), stat.S_ISREG(s.st_mode), s.st_nlink,
-                          stat.S_ISLNK(s.st_mode))
+                          stat.S_ISLNK(s.st_mode),
+                          (s.st_size, s.st_mtime_ns, s.st_ctime_ns))
 
     def edge_matches(self, parent, name, child):
         s = self.os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -737,7 +743,9 @@ class _WindowsAPI:
         directory = bool(info.attributes & 0x10)
         return HandleInfo(FileIdentity(match[1].lower(), bytes(identity.file_id).hex()), directory,
                           not directory and self.k.GetFileType(handle) == 1, info.links,
-                          bool(info.attributes & 0x400))
+                          bool(info.attributes & 0x400),
+                          ((info.size_high << 32) | info.size_low,
+                           (info.written.dwHighDateTime << 32) | info.written.dwLowDateTime))
 
     def close(self, handle):
         self._check(self.k.CloseHandle(handle))

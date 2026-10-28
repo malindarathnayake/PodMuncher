@@ -618,8 +618,8 @@ def _open_fixture_root(path: Path) -> _FixtureRootAnchor:
                 raise _failure(ReasonCode.ASSET_SOURCE_REJECTED)
             handle, _handle_identity = _windows_directory_handle(root)
             try:
-                if (_normalized_windows_handle_path(handle)
-                        != _normalized_windows_declared_path(root)):
+                if not _windows_declared_matches(
+                        _normalized_windows_handle_path(handle), root):
                     raise OSError("root handle path mismatch")
             except Exception:
                 _close_windows_handle(handle)
@@ -935,13 +935,46 @@ def _normalized_windows_handle_path(handle: int) -> str:
     return ntpath.normcase(normalized)
 
 
-def _normalized_windows_declared_path(path: Path) -> str:
+def _normalized_windows_declared_path(path: Path, *, expand: bool = False) -> str:
+    import ctypes
     import ntpath
+    from ctypes import wintypes
 
-    normalized = ntpath.normpath(os.path.abspath(os.fspath(path))).replace("/", "\\")
+    absolute = os.path.abspath(os.fspath(path))
+    if not expand:
+        return ntpath.normcase(ntpath.normpath(absolute))
+
+    get_long_path = ctypes.WinDLL("kernel32", use_last_error=True).GetLongPathNameW
+    get_long_path.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+    get_long_path.restype = wintypes.DWORD
+
+    # Expand 8.3 short components (for example RUNNER~1) so the declared path
+    # matches the long-name form GetFinalPathNameByHandleW reports. This does
+    # not follow junctions or symlinks, so a redirected root still mismatches.
+    required = get_long_path(absolute, None, 0)
+    if required == 0:
+        raise ctypes.WinError(ctypes.get_last_error())
+    capacity = required + 1
+    buffer = ctypes.create_unicode_buffer(capacity)
+    written = get_long_path(absolute, buffer, capacity)
+    if written == 0:
+        raise ctypes.WinError(ctypes.get_last_error())
+    if written >= capacity:
+        raise OSError("truncated long path")
+
+    normalized = ntpath.normpath(buffer.value).replace("/", "\\")
     if not ntpath.isabs(normalized):
         raise OSError("non-absolute declared path")
     return ntpath.normcase(normalized)
+
+
+def _windows_declared_matches(handle_path: str, path: Path) -> bool:
+    # The lexical comparison is the first answer; the long-name expansion runs
+    # only on a mismatch so a listing-denied ancestor cannot reject a root the
+    # lexical form already proves. An expansion failure raises OSError.
+    if _normalized_windows_declared_path(path) == handle_path:
+        return True
+    return _normalized_windows_declared_path(path, expand=True) == handle_path
 
 
 def _verify_windows_handle_path(
@@ -954,8 +987,7 @@ def _verify_windows_handle_path(
     if anchor.handle is None or not parts:
         raise _failure()
     root_path = _normalized_windows_handle_path(anchor.handle)
-    declared_root = _normalized_windows_declared_path(anchor.path)
-    if root_path != declared_root:
+    if not _windows_declared_matches(root_path, anchor.path):
         raise _failure()
     expected = ntpath.normcase(ntpath.normpath(ntpath.join(root_path, *parts)))
     prefix = root_path.rstrip("\\") + "\\"

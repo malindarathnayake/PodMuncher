@@ -548,6 +548,43 @@ def test_windows_fixture_root_replace_restore_before_file_open_is_rejected(
     assert replacement_attempted
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows 8.3 short-name regression")
+def test_fixture_root_accepts_short_name_path(tmp_path):
+    import ctypes
+    from ctypes import wintypes
+
+    long_root = tmp_path / "long directory name for short form"
+    long_root.mkdir()
+    get_short = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+    get_short.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+    get_short.restype = wintypes.DWORD
+    buffer = ctypes.create_unicode_buffer(1024)
+    written = get_short(str(long_root), buffer, 1024)
+    if written == 0 or written >= 1024 or buffer.value.lower() == str(long_root).lower():
+        pytest.skip("volume does not provide 8.3 short names")
+    short_root = Path(buffer.value)
+
+    path, _ = write_manifest(short_root)
+    manifest = load_manifest(path, development=True)
+    assert resolve_capability(manifest, Capability.ASR_CPU) is not None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction regression")
+def test_windows_junctioned_fixture_root_is_rejected(tmp_path):
+    import _winapi
+
+    real_root = tmp_path / "real"
+    real_root.mkdir()
+    write_manifest(real_root)
+    junction = tmp_path / "junction"
+    _winapi.CreateJunction(str(real_root), str(junction))
+
+    reason(
+        ReasonCode.ASSET_SOURCE_REJECTED,
+        lambda: load_manifest(junction / "manifest.json", development=True),
+    )
+
+
 def test_capability_and_model_tier_reject_registry_negative_examples(tmp_path):
     registry = json.loads(
         (Path(__file__).parents[1] / "Docs" / "contract-domains.json").read_text(encoding="utf-8")

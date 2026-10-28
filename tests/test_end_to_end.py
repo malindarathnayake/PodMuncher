@@ -27,6 +27,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 import threading
 import time
 import wave
@@ -39,9 +40,9 @@ from typing import Any, Self
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-# The repo venv's console script: ``Scripts\podmuncher.exe`` on Windows, ``bin/podmuncher`` on
-# POSIX (the Mac test venv is installed with ``uv pip install -e .``).
-CONSOLE = ROOT / ".venv" / ("Scripts" if os.name == "nt" else "bin") / (
+# The running interpreter's console script: its script directory (``sysconfig`` ``scripts``) names
+# a venv and a system install alike (``podmuncher.exe`` on Windows, ``podmuncher`` on POSIX).
+CONSOLE = Path(sysconfig.get_path("scripts")) / (
     "podmuncher.exe" if os.name == "nt" else "podmuncher")
 ENV_NAMES = ("PODMUNCHER_TEST_MEDIA_IMAGE", "PODMUNCHER_TEST_ASR_IMAGE",
              "PODMUNCHER_TEST_MODEL_ROOT", "PODMUNCHER_TEST_DIRECT_URL",

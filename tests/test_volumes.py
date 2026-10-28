@@ -358,7 +358,8 @@ class PosixOS:
         self.opens.append((name, flags, kwargs))
         return len(self.opens)
     def fstat(self, fd):
-        return SimpleNamespace(st_dev=42, st_ino=fd, st_mode=stat.S_IFDIR, st_nlink=1)
+        return SimpleNamespace(st_dev=42, st_ino=fd, st_mode=stat.S_IFDIR, st_nlink=1,
+                               st_size=0, st_mtime_ns=0, st_ctime_ns=0)
     def fstatvfs(self, fd):
         return SimpleNamespace(f_blocks=1000, f_frsize=4096, f_bavail=500, f_favail=73, f_flag=0)
     def major(self, dev): return 8
@@ -571,7 +572,8 @@ class DarwinOS(PosixOS):
         return fd
 
     def fstat(self, fd):
-        return SimpleNamespace(st_dev=MAC_DEV, st_ino=fd, st_mode=stat.S_IFDIR, st_nlink=1)
+        return SimpleNamespace(st_dev=MAC_DEV, st_ino=fd, st_mode=stat.S_IFDIR, st_nlink=1,
+                               st_size=0, st_mtime_ns=0, st_ctime_ns=0)
 
     def stat(self, name, *, dir_fd, follow_symlinks):
         assert follow_symlinks is False

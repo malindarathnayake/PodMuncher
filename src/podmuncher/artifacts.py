@@ -11,7 +11,10 @@ errors carry only a closed reason code and audit arguments never contain them.
 
 POSIX cannot atomically bind a rename to an inode, so the source identity is
 re-proved immediately before the move and the destination identity immediately
-after it. A swap in that window is reported as rejected and the destination is
+after it. Identity alone cannot see an inode reused by a replacement or an in-place
+rewrite, so the source also carries a private change stamp (size, mtime and, on
+POSIX, ctime; Windows size and last-write time) read from the held handle at
+verification and re-read before the move. A swap in that window is reported as rejected and the destination is
 left in place for the operator (it is never silently deleted).
 """
 from __future__ import annotations
@@ -108,6 +111,7 @@ class VerifiedFile:
     bytes: int
     sha256: str
     identity: FileIdentity = field(repr=False)
+    stamp: tuple = field(repr=False)
     attempt_dir: str = field(repr=False)
     basename: str = field(repr=False)
 
@@ -205,7 +209,7 @@ def _verify(attempt_dir, assignment, slot, claimed_bytes, claimed_sha256, writer
     json_buffer = bytearray() if kind is ArtifactSlot.TRANSCRIPT_JSON else None
     digest, total = hashlib.sha256(), 0
     with open_contained(attempt_dir, name, adapter=adapter) as held:
-        identity = held.identity
+        identity, stamp = held.identity, held.stamp()
         while True:
             chunk = held.read(CHUNK)
             if not chunk:
@@ -221,10 +225,12 @@ def _verify(attempt_dir, assignment, slot, claimed_bytes, claimed_sha256, writer
             if json_buffer is not None:
                 json_buffer.extend(chunk)
         held.verify()
+        if held.stamp() != stamp:
+            raise ArtifactError()
     if total != claimed_bytes or digest.hexdigest() != claimed_sha256:
         raise ArtifactError()
     _check_content(kind, total, decoder, json_buffer)
-    return VerifiedFile(worker_slot, kind, total, claimed_sha256, identity,
+    return VerifiedFile(worker_slot, kind, total, claimed_sha256, identity, stamp,
                         attempt_dir, name)
 
 
@@ -300,6 +306,8 @@ def _prove_source(verified: VerifiedFile, adapter: VolumeAdapter) -> None:
     with open_contained(verified.attempt_dir, verified.basename,
                         expected=verified.identity, adapter=adapter) as held:
         held.verify()
+        if held.stamp() != verified.stamp:
+            raise ArtifactError()
 
 
 def _prove_destination(job_path: str, name: str, expected: FileIdentity,

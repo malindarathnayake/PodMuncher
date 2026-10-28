@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import socket
 import struct
 import time
@@ -733,8 +734,10 @@ def test_keepalive_serves_multiple_requests(tmp_path):
             for _ in range(3):
                 writer.write(build(port, "GET", "/v1/identity", headers={"Connection": "keep-alive"}))
                 await writer.drain()
-                data = await asyncio.wait_for(reader.read(65536), 2)
-                assert data.startswith(b"HTTP/1.1 200")
+                head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 2)
+                length = int(re.search(rb"(?im)^content-length:\s*(\d+)", head).group(1))
+                await asyncio.wait_for(reader.readexactly(length), 2)
+                assert head.startswith(b"HTTP/1.1 200")
             writer.close()
             assert actions.calls == ["identity"] * 3
     run(scenario())

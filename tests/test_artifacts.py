@@ -324,6 +324,25 @@ async def test_replacement_by_other_regular_file_rejected(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_in_place_rewrite_after_verification_rejected(tmp_path):
+    data = b'real'
+    attempt, assignment = make_attempt_files(tmp_path, {WorkerSlot.MERGED_VIDEO: data})
+    verified = verify(attempt, assignment, 'merged_video', data)
+    path = Path(attempt) / assignment[WorkerSlot.MERGED_VIDEO]
+    before = path.stat().st_mtime_ns
+    with open(path, 'r+b') as handle:
+        handle.write(b'fake')
+    # Coarse timestamp granularity could hide the rewrite; bump mtime explicitly.
+    os.utime(path, ns=(before + 1_000_000_000, before + 1_000_000_000))
+    root = output_root(tmp_path)
+    with pytest.raises(ArtifactError) as error:
+        await publish(verified, ArtifactSlot.ORIGINAL_VIDEO, job_id=JOB,
+                      output_root=root, guard=None, audit=Audit())
+    assert reason_of(error) is ReasonCode.ARTIFACT_REJECTED
+    assert job_files(root) == []
+
+
+@pytest.mark.asyncio
 async def test_job_dir_symlink_rejected(tmp_path):
     data = b'real'
     attempt, assignment = make_attempt_files(tmp_path, {WorkerSlot.MERGED_VIDEO: data})
