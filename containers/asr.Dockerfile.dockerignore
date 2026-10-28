@@ -1,0 +1,9 @@
+# Build context is limited to exactly what containers/asr.Dockerfile copies.
+*
+!containers/asr.Dockerfile
+!src/podmuncher/__init__.py
+!src/podmuncher/domains.py
+!src/podmuncher/config.py
+!src/podmuncher/requests.py
+!src/podmuncher/protocol.py
+!src/podmuncher/asr_worker.py

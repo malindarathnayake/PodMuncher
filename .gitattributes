@@ -1,0 +1,4 @@
+# Store every file byte-for-byte. release.json binds image build inputs and GPU evidence
+# to the SHA-256 of the raw source bytes, and some sources use CRLF line endings, so any
+# line-ending conversion on commit or checkout would break the release gates.
+* -text

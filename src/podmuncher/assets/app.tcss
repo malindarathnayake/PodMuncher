@@ -1,0 +1,229 @@
+/* Podmuncher dashboard styles.
+   Terminal-adaptive: backgrounds follow the terminal theme. Orange is reserved for
+   focus and the primary action. Status is always carried by words, never by colour
+   alone, so NO_COLOR and monochrome terminals lose nothing. No animations. */
+
+Screen {
+    background: $background;
+    color: $foreground;
+}
+
+#main {
+    width: 100%;
+    height: 100%;
+}
+
+#readiness {
+    height: 1;
+    width: 100%;
+    text-style: bold;
+    background: $panel;
+    padding: 0 1;
+}
+
+#tabs {
+    height: 1;
+    width: 100%;
+    padding: 0 1;
+}
+
+#tabs:focus {
+    background: #ff8c1a;
+    color: #000000;
+    text-style: bold reverse;
+}
+
+#body {
+    height: 1fr;
+    width: 100%;
+}
+
+#hint {
+    height: 1;
+    width: 100%;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+#notice {
+    height: auto;
+    padding: 0 1;
+}
+
+#notice.-empty {
+    display: none;
+}
+
+#resize-notice {
+    display: none;
+    width: 100%;
+    height: 100%;
+    padding: 1 2;
+    content-align: left middle;
+}
+
+Screen.-too-small #main {
+    display: none;
+}
+
+Screen.-too-small #resize-notice {
+    display: block;
+}
+
+.view {
+    width: 100%;
+    height: 100%;
+    display: none;
+}
+
+.view.-active {
+    display: block;
+}
+
+#view-overview.-active {
+    layout: vertical;
+}
+
+#view-overview.-wide.-active {
+    layout: horizontal;
+}
+
+#jobs-panel {
+    width: 100%;
+    height: 1fr;
+    padding: 0 1;
+}
+
+#resources-panel {
+    width: 100%;
+    height: auto;
+    max-height: 12;
+    padding: 0 1;
+}
+
+#view-overview.-wide #jobs-panel {
+    width: 1fr;
+    height: 100%;
+}
+
+#view-overview.-wide #resources-panel {
+    width: 56;
+    height: 100%;
+    max-height: 100%;
+}
+
+#jobs {
+    height: 1fr;
+    border: none;
+}
+
+OptionList:focus {
+    border: none;
+}
+
+OptionList > .option-list--option-highlighted {
+    text-style: bold reverse;
+}
+
+OptionList:focus > .option-list--option-highlighted {
+    background: #ff8c1a;
+    color: #000000;
+    text-style: bold;
+}
+
+VerticalScroll:focus {
+    border-left: thick #ff8c1a;
+}
+
+Static {
+    height: auto;
+}
+
+Input {
+    border: tall $panel;
+}
+
+Input:focus {
+    border: tall #ff8c1a;
+}
+
+Button {
+    height: 1;
+    min-width: 0;
+    width: 100%;
+    border: none;
+    text-align: left;
+    content-align: left middle;
+    padding: 0 1;
+    background: $panel;
+    color: $foreground;
+}
+
+Button:focus {
+    text-style: bold reverse;
+    background: #ff8c1a;
+    color: #000000;
+}
+
+Button.-primary {
+    text-style: bold;
+}
+
+Button:disabled {
+    text-style: dim;
+}
+
+#new-form {
+    padding: 0 1;
+}
+
+#actions {
+    height: auto;
+    padding: 0 1;
+}
+
+#detail-scroll {
+    height: 1fr;
+    padding: 0 1;
+}
+
+#view-models {
+    padding: 0 1;
+}
+
+#storage-panel {
+    height: auto;
+    max-height: 8;
+}
+
+#cache {
+    height: 1fr;
+    border: none;
+}
+
+#setup-scroll {
+    height: 1fr;
+    padding: 0 1;
+}
+
+ConfirmScreen, HelpScreen {
+    align: center middle;
+}
+
+#dialog {
+    width: 70%;
+    min-width: 40;
+    max-width: 100;
+    height: auto;
+    padding: 1 2;
+    border: thick $panel;
+    background: $background;
+}
+
+#dialog-title {
+    text-style: bold;
+}
+
+#dialog Button {
+    margin-top: 1;
+}

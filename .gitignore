@@ -1,0 +1,87 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Tool caches and test scratch
+.pytest_cache/
+.pytest-tmp/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.out
+*.prof
+
+# Release evidence produced by the release workflow
+release-evidence/
+
+# Media, transcripts and model weights (never committed)
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.mp3
+*.m4a
+*.wav
+*.flac
+*.srt
+*.vtt
+*.safetensors
+*.onnx
+*.gguf
+*.pt
+transcripts/
+models/
+podmuncher-*/
+
+# Secrets and machine certificates
+.env
+.env.*
+*.pem
+*.crt
+*.cer
+*.key
+*.p12
+*.pfx
+
+# Local agent and workflow state
+.codex/
+.claude/
+**/.foreman-*
+
+# Scratch notes and editor files
+New Text Document*.txt
+*.zip
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Internal working documents kept local only
+Docs/notebook-summary-brief.md
+Docs/design-review-claude.txt
+Docs/spec-review-claude.txt
+Docs/PROGRESS.md
+.thumbnail
+Docs/handoff.md
+Docs/implementation-units.json
+Docs/testing-harness.md
+Docs/dependency-discovery.json
+Docs/spec-grounding.md
+Docs/spec-review.md
+Docs/design-review-native.md
+Docs/spec.md
+Docs/design-summary.md
+Docs/storage-discovery.md
+Docs/terminal-layouts.md
+Docs/video-enhancement-research.txt
+Docs/podmuncher-requirements.txt
+Docs/podmuncher-branding-prompt.txt
+Docs/diagrams/podmuncher.mmd
+.playwright-mcp/

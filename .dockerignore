@@ -1,0 +1,10 @@
+# Build context is limited to exactly what containers/media.Dockerfile copies.
+*
+!containers/media.Dockerfile
+!src/podmuncher/__init__.py
+!src/podmuncher/domains.py
+!src/podmuncher/config.py
+!src/podmuncher/requests.py
+!src/podmuncher/protocol.py
+!src/podmuncher/direct_download.py
+!src/podmuncher/media_worker.py

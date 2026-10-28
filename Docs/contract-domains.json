@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "negative_examples": [
+    "__invalid__",
+    ""
+  ],
+  "job_state": [
+    "queued",
+    "checking",
+    "blocked",
+    "preparing",
+    "downloading",
+    "probing",
+    "transcribing",
+    "exporting",
+    "completed",
+    "partial",
+    "failed",
+    "cancelled",
+    "interrupted"
+  ],
+  "stage": [
+    "checking",
+    "preparing",
+    "downloading",
+    "probing",
+    "transcribing",
+    "exporting"
+  ],
+  "source": [
+    "local",
+    "direct",
+    "youtube"
+  ],
+  "device": [
+    "auto",
+    "cpu",
+    "cuda"
+  ],
+  "backend": [
+    "cpu",
+    "cuda"
+  ],
+  "profile": [
+    "balanced",
+    "quality"
+  ],
+  "field_status": [
+    "ok",
+    "unknown",
+    "stale",
+    "error",
+    "not_applicable"
+  ],
+  "worker_event": [
+    "started",
+    "progress",
+    "artifact",
+    "warning",
+    "error",
+    "completed"
+  ],
+  "output_mode": [
+    "transcript",
+    "video_transcript",
+    "video"
+  ],
+  "artifact_slot": [
+    "original_video",
+    "transcript_txt",
+    "transcript_timestamped_txt",
+    "transcript_readable_txt",
+    "transcript_srt",
+    "transcript_json"
+  ],
+  "artifact_format": [
+    "video",
+    "txt",
+    "timestamped_txt",
+    "readable_txt",
+    "srt",
+    "json"
+  ],
+  "theme": [
+    "auto",
+    "light",
+    "dark"
+  ],
+  "capability": [
+    "media",
+    "asr_cpu",
+    "asr_cuda"
+  ],
+  "model_tier": [
+    "tiny",
+    "base",
+    "small",
+    "medium",
+    "large"
+  ],
+  "preflight_result": [
+    "pass",
+    "blocked"
+  ],
+  "preflight_reason": [
+    "disk",
+    "ram",
+    "gpu",
+    "docker",
+    "input",
+    "permission",
+    "asset",
+    "unknown"
+  ],
+  "stage_outcome": [
+    "ok",
+    "error",
+    "cancelled"
+  ],
+  "resource": [
+    "host_ram",
+    "worker_ram",
+    "gpu_vram"
+  ],
+  "context": [
+    "host",
+    "docker_vm"
+  ],
+  "device_slot": [
+    0
+  ],
+  "volume_slot": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "service_state": [
+    "running",
+    "stopped",
+    "stopping",
+    "recovering"
+  ],
+  "budget_confidence": [
+    "measured",
+    "conservative",
+    "unknown"
+  ],
+  "video_quality": [
+    "1080p",
+    "source_best"
+  ],
+  "component": [
+    "api",
+    "service",
+    "storage",
+    "runtime",
+    "acquisition",
+    "model",
+    "worker",
+    "artifacts",
+    "telemetry",
+    "cli",
+    "tui",
+    "config"
+  ],
+  "reason_code": [
+    "ok",
+    "invalid_input",
+    "invalid_config",
+    "unsupported_schema",
+    "unauthorized",
+    "invalid_host",
+    "browser_origin_rejected",
+    "request_too_large",
+    "request_timeout",
+    "rate_limited",
+    "unsupported_transfer_encoding",
+    "nesting_limit",
+    "queue_full",
+    "conflict",
+    "already_terminal",
+    "service_stopped",
+    "service_lost",
+    "service_unavailable",
+    "storage_insufficient",
+    "storage_unknown",
+    "storage_stale",
+    "storage_guard_tripped",
+    "quota_exceeded",
+    "state_write_failed",
+    "audit_loss",
+    "docker_unavailable",
+    "docker_context_unsupported",
+    "backing_unresolved",
+    "gpu_unavailable",
+    "ram_insufficient",
+    "envelope_unvalidated",
+    "asset_verification_failed",
+    "asset_source_rejected",
+    "worker_protocol_mismatch",
+    "worker_exit_unexpected",
+    "media_probe_failed",
+    "media_limit_reached",
+    "input_rejected",
+    "display_text_sanitized",
+    "event_limit_reached",
+    "download_timeout",
+    "upstream_unavailable",
+    "content_denied",
+    "source_changed",
+    "no_audio",
+    "no_video",
+    "duration_unknown",
+    "duration_exceeded",
+    "model_oom",
+    "model_load_failed",
+    "publication_failed",
+    "destination_conflict",
+    "artifact_rejected",
+    "cancellation_requested",
+    "cancelled",
+    "writer_unresolved",
+    "cache_in_use",
+    "cache_unknown",
+    "export_limit_reached",
+    "telemetry_dropped"
+  ],
+  "worker_slot": [
+    "downloaded_media",
+    "downloaded_audio",
+    "downloaded_video",
+    "merged_video",
+    "transcript_segments",
+    "probe_metadata"
+  ]
+}

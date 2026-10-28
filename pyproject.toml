@@ -1,0 +1,103 @@
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "podmuncher"
+version = "0.1.0.dev0"
+description = "Local podcast processing tools."
+requires-python = ">=3.12,<3.15"
+license = "Apache-2.0"
+license-files = []
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = [
+    "textual==8.2.8",
+    "aiohttp==3.14.4",
+    "psutil==7.2.2",
+    "platformdirs==4.12.4",
+    "opentelemetry-api==1.45.1",
+    "opentelemetry-sdk==1.45.1",
+    "opentelemetry-exporter-otlp-proto-grpc==1.45.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "build==1.6.1",
+    "hatchling==1.32.4",
+    "ruff==0.17.0",
+]
+
+[project.scripts]
+podmuncher = "podmuncher:main"
+
+[tool.hatch.build]
+# Never ship research inputs, transcripts, model weights, CA/key material, secrets,
+# Foreman state or bytecode caches in any distribution.
+exclude = [
+    "/HN844",
+    "/research",
+    "/Docs",
+    "/.venv",
+    "/.pytest-tmp",
+    "/.codex",
+    "**/.foreman-*",
+    "**/__pycache__",
+    "**/*.py[cod]",
+    "**/transcripts",
+    "**/models",
+    "**/*.pem",
+    "**/*.crt",
+    "**/*.cer",
+    "**/*.key",
+    "**/*.p12",
+    "**/*.pfx",
+    "**/.env",
+    "**/.env.*",
+    "**/*.safetensors",
+    "**/*.bin",
+    "**/*.onnx",
+    "**/*.pt",
+    "**/*.gguf",
+    "**/*.mp3",
+    "**/*.wav",
+    "**/*.srt",
+    "**/*.vtt",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/podmuncher"]
+# Package data under src/podmuncher ships with the package: assets/app.tcss,
+# assets/welcome.txt now, and any manifests/assets added by later units (P6-U5).
+artifacts = ["src/podmuncher/assets/**"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/pyproject.toml", "/requirements.lock", "/src/podmuncher", "/tests/test_package.py"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+# Disposable repo-root basetemp: avoids the shared Windows pytest temp-root
+# permission failure, and its parent (the repo root) exists on a fresh checkout.
+addopts = "--basetemp=.pytest-tmp"
+markers = ["live: tests requiring live external services or infrastructure"]
+
+[tool.ruff]
+target-version = "py312"
+extend-exclude = ["HN844", "research"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
