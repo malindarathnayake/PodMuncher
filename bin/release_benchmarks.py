@@ -10,6 +10,10 @@ Subcommands:
     ASR candidate and collects GPU passthrough evidence. Every record is appended as its canonical JSONL
     line to ``FILE.records.jsonl`` as it completes; the full result is written to ``FILE``.
 
+``gpu FILE [--manifest PATH]``
+    Recomputes only ``gpu_evidence`` of a run output (nvidia-smi and ctranslate2 inside the current CUDA
+    candidate; the container GPU uuid must match the host) and writes the file back.
+
 ``apply FILE [--manifest PATH]``
     Validates a ``run`` output against the manifest's current amd64 build identities, replaces the benchmark
     evidence, recomputes the amd64 tiny/base/small envelopes and the conditional blockers, rehashes the
@@ -25,6 +29,7 @@ import functools
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -72,6 +77,7 @@ MEASUREMENT_FIELDS = ("load_seconds", "transcribe_wall_seconds", "audio_seconds"
                       "peak_rss_bytes", "worker_vram_delta_bytes", "segments", "detected_language")
 GPU_FIELDS = ("passthrough", "method", "name", "driver_version", "uuid", "memory_total_bytes", "bound_image_id",
               "container_cuda_device_count", "container_cuda_compute_types", "checked_at")
+GPU_UUID = re.compile(r"GPU-[0-9a-f-]{36}")
 POLICY_COMPUTE = {"asr_cpu": "int8", "asr_cuda": "int8_float16"}
 # Reasons raised by the host side (storage watchdog, guard, Docker, deadlines), never by the worker.
 HOST_GUARD_REASONS = frozenset({
@@ -255,6 +261,7 @@ def validate_run(result: dict, document: dict) -> None:
     _require(fixtures and all(set(f) == {"name", "codec", "seconds", "bytes", "sha256"} for f in fixtures),
              "fixture keys")
     _require({f["codec"] for f in fixtures} == set(CODECS), "fixture codecs")
+    _require(all(f["seconds"] in FIXTURE_SECONDS for f in fixtures), "fixture seconds outside the matrix")
     fixture_points = {(f["codec"], f["seconds"]) for f in fixtures}
     records = result["records"]
     _require(records, "no records")
@@ -268,6 +275,9 @@ def validate_run(result: dict, document: dict) -> None:
         _require(record["bound_to_current_build"] is True and record["platform"] == AMD64,
                  f"record {record['name']} build binding")
         _require(record["record_sha256"] == record_hash(record), f"record_sha256 of {record['name']}")
+        _require(record["fixture_seconds"] in FIXTURE_SECONDS, f"fixture_seconds of {record['name']}")
+        _require(record["cpus"] == CPUS and record["memory_cap_bytes"] == MEMORY_CAP,
+                 f"cpus or memory cap of {record['name']}")
         outcome = record["outcome"]
         _require(outcome == "completed" or outcome.startswith(("worker_failure:", "host_guard_failure:")),
                  f"outcome of {record['name']}")
@@ -301,6 +311,9 @@ def validate_run(result: dict, document: dict) -> None:
     cuda_ok = [r for r in records if r["capability"] == "asr_cuda" and r["outcome"] == "completed"]
     _require(gpu["passthrough"] == bool(cuda_ok), "gpu passthrough disagrees with the CUDA records")
     _require("int8_float16" in gpu["container_cuda_compute_types"], "gpu compute types")
+    _require(type(gpu["uuid"]) is str and GPU_UUID.fullmatch(gpu["uuid"]) is not None, "gpu uuid")
+    _require(gpu["passthrough"] == (gpu["container_cuda_device_count"] >= 1),
+             "gpu passthrough disagrees with the container device count")
 
 
 def apply_run(document: dict, result: dict) -> dict:
@@ -664,18 +677,44 @@ def generate_fixtures(media_image: str, out: Path) -> list[dict]:
 
 
 def gpu_evidence(cuda_image: str) -> dict:
-    line = _nvidia_smi("--query-gpu=name,driver_version,uuid,memory.total", "--format=csv,noheader,nounits")
-    name, driver, uuid, memory = [part.strip() for part in line.splitlines()[0].split(",")]
+    """GPU identity from nvidia-smi inside the CUDA candidate, plus its ctranslate2 view; no host fallback."""
+    query = _docker("run", "--rm", "--pull", "never", "--gpus", "all", "--network", "none", "--entrypoint",
+                    "nvidia-smi", cuda_image, "--query-gpu=name,driver_version,uuid,memory.total",
+                    "--format=csv,noheader,nounits", timeout=300)
+    _require(query.returncode == 0, "gpu evidence container nvidia-smi: "
+             + query.stderr.decode("utf-8", "replace")[-400:])
+    try:
+        name, driver, uuid, memory = [part.strip() for part in
+                                      query.stdout.decode("utf-8").strip().splitlines()[0].split(",")]
+        memory_bytes = int(memory) * MIB
+    except (ValueError, IndexError) as error:
+        raise ToolError("gpu evidence container nvidia-smi: unparseable output") from error
+    host_uuids = [line.strip() for line in _nvidia_smi("--query-gpu=uuid", "--format=csv,noheader").splitlines()]
+    _require(uuid in host_uuids, f"gpu evidence: container GPU uuid {uuid} does not match the host uuid")
     script = ("import ctranslate2,json; print(json.dumps({'count': ctranslate2.get_cuda_device_count(), "
               "'types': sorted(ctranslate2.get_supported_compute_types('cuda'))}))")
     shown = _docker("run", "--rm", "--pull", "never", "--gpus", "all", "--network", "none", "--entrypoint", "python",
                     cuda_image, "-c", script, timeout=300)
-    _require(shown.returncode == 0, "gpu evidence container: " + shown.stderr.decode("utf-8", "replace")[-400:])
+    _require(shown.returncode == 0, "gpu evidence container ctranslate2: "
+             + shown.stderr.decode("utf-8", "replace")[-400:])
     inside = json.loads(shown.stdout.decode("utf-8").strip().splitlines()[-1])
     return {"passthrough": inside["count"] >= 1, "method": GPU_METHOD, "name": name, "driver_version": driver,
-            "uuid": uuid, "memory_total_bytes": int(memory) * MIB, "bound_image_id": cuda_image,
+            "uuid": uuid, "memory_total_bytes": memory_bytes, "bound_image_id": cuda_image,
             "container_cuda_device_count": inside["count"], "container_cuda_compute_types": inside["types"],
             "checked_at": _utc_now().strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+
+def cmd_gpu(args) -> int:
+    """Recompute only gpu_evidence of a run output for the manifest's current amd64 asr_cuda image."""
+    path = Path(args.file)
+    result = json.loads(path.read_text("utf-8"))
+    _require(type(result) is dict and "gpu_evidence" in result, "run output has no gpu_evidence")
+    document = json.loads(Path(args.manifest).read_text("utf-8"))
+    result["gpu_evidence"] = gpu_evidence(current_image_ids(document)["asr_cuda"])
+    path.write_text(json.dumps(result, indent=1, ensure_ascii=True) + "\n", encoding="utf-8", newline="\n")
+    gpu = result["gpu_evidence"]
+    print(f"[gpu] passthrough={gpu['passthrough']} {gpu['name']} driver {gpu['driver_version']} -> {path}")
+    return 0
 
 
 def _load_amd64_runtime(document: dict):
@@ -750,6 +789,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--out", required=True)
     run.add_argument("--manifest", default=str(REPO / MANIFEST_REL))
     run.set_defaults(func=cmd_run)
+    gpu = sub.add_parser("gpu", help="recompute only the gpu_evidence of a run output")
+    gpu.add_argument("file")
+    gpu.add_argument("--manifest", default=str(REPO / MANIFEST_REL))
+    gpu.set_defaults(func=cmd_gpu)
     apply = sub.add_parser("apply", help="validate a run output and update the manifest")
     apply.add_argument("file")
     apply.add_argument("--manifest", default=str(REPO / MANIFEST_REL))

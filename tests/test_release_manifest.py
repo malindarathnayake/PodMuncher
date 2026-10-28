@@ -1387,8 +1387,9 @@ def test_release_manifest_live_assets(tmp_path):
             if cap == "asr_cpu":
                 assert envelope_types <= set(probe["compute_types"])
             assert probe["device"] == ("cuda" if cap == "asr_cuda" else "cpu")
-            recorded = document["benchmarks"]["probes"][cap]
-            assert probe["compute_types"] == recorded["compute_types"]
+            if platform == AMD64:  # benchmarks.probes records the amd64 probes only
+                recorded = document["benchmarks"]["probes"][cap]
+                assert probe["compute_types"] == recorded["compute_types"]
             probes[cap] = probe
     finally:
         shutil.rmtree(work, ignore_errors=True)

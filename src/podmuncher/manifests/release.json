@@ -1502,7 +1502,7 @@
    "int8_float16",
    "int8_float32"
   ],
-  "checked_at": "2026-10-28T04:46:08Z"
+  "checked_at": "2026-10-28T05:47:40Z"
  },
  "benchmarks": {
   "method": "Owned DockerRuntime transcribe runs (network none, read-only, 65532:65532, 1 CPU, memory cap as listed); measurements are the ASR worker result document; CUDA VRAM is the host nvidia-smi memory.used peak minus the pre-run baseline. Raw records are not retained; record_sha256 is the sha256 of each raw JSONL record. bound_image_id is the local image the run used; only records bound to the current build feed envelopes.",

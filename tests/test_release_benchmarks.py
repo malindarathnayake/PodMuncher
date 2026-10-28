@@ -232,3 +232,58 @@ def test_apply_refuses_stale_image_binding_and_leaves_manifest_untouched(tmp_pat
     run_file.write_text(json.dumps(run), encoding="utf-8")
     assert bench.main(["apply", str(run_file), "--manifest", str(manifest)]) == 1
     assert manifest.read_bytes() == before
+
+
+def test_gpu_evidence_uses_in_container_nvidia_smi(monkeypatch):
+    uuid = "GPU-0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d"
+    image = "sha256:" + "ef56" * 16
+    calls = []
+    host = {"uuid": uuid}
+
+    def fake_docker(*arguments, timeout=120):
+        calls.append(arguments)
+        entrypoint = arguments[arguments.index("--entrypoint") + 1]
+        if entrypoint == "nvidia-smi":
+            out = f"NVIDIA Container GPU, 600.01, {uuid}, 12282\n"
+        else:
+            out = json.dumps({"count": 1, "types": ["float16", "int8", "int8_float16"]}) + "\n"
+        return bench.subprocess.CompletedProcess(arguments, 0, out.encode(), b"")
+
+    def fake_nvidia_smi(*arguments):
+        assert arguments == ("--query-gpu=uuid", "--format=csv,noheader")
+        return host["uuid"]
+
+    monkeypatch.setattr(bench, "_docker", fake_docker)
+    monkeypatch.setattr(bench, "_nvidia_smi", fake_nvidia_smi)
+    gpu = bench.gpu_evidence(image)
+    smi = next(call for call in calls if "nvidia-smi" in call)
+    assert smi[smi.index("--gpus") + 1] == "all" and smi[smi.index("--entrypoint") + 1] == "nvidia-smi"
+    assert smi[smi.index("--network") + 1] == "none" and image in smi
+    assert tuple(gpu) == bench.GPU_FIELDS
+    assert (gpu["name"], gpu["driver_version"], gpu["uuid"]) == ("NVIDIA Container GPU", "600.01", uuid)
+    assert gpu["memory_total_bytes"] == 12282 * 1024**2
+    assert gpu["passthrough"] is True and gpu["container_cuda_device_count"] == 1
+    assert gpu["method"] == bench.GPU_METHOD and gpu["bound_image_id"] == image
+
+    host["uuid"] = "GPU-ffffffff-0000-1111-2222-333333333333"
+    with pytest.raises(bench.ToolError, match="uuid"):
+        bench.gpu_evidence(image)
+
+    def failing_docker(*arguments, timeout=120):
+        return bench.subprocess.CompletedProcess(arguments, 1, b"", b"no GPU")
+
+    monkeypatch.setattr(bench, "_docker", failing_docker)
+    with pytest.raises(bench.ToolError, match="nvidia-smi"):
+        bench.gpu_evidence(image)
+
+
+@pytest.mark.parametrize("change", [{"fixture_seconds": 21600}, {"cpus": 64.0}])
+def test_apply_refuses_out_of_matrix_fixture_or_cpus(tmp_path, change):
+    manifest = _copy(tmp_path)
+    before = manifest.read_bytes()
+    run = _synthetic_run(json.loads(before))
+    run["records"].append(bench.seal_record(dict(run["records"][1], **change)))
+    run_file = tmp_path / "run.json"
+    run_file.write_text(json.dumps(run), encoding="utf-8")
+    assert bench.main(["apply", str(run_file), "--manifest", str(manifest)]) == 1
+    assert manifest.read_bytes() == before
