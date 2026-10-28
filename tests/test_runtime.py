@@ -3,6 +3,7 @@ import asyncio
 import base64
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
+import errno
 import hashlib
 import io
 import json
@@ -660,7 +661,12 @@ def test_posix_without_pidfd_still_revalidates_creation_identity():
 
 def test_linux_pidfd_route_is_unchanged(monkeypatch):
     sent, opened = [], []
-    monkeypatch.setattr(os, 'pidfd_open', lambda pid, *_flags: opened.append(pid) or 77, raising=False)
+    def fake_pidfd_open(pid, *_flags):
+        if pid != 4242:  # asyncio's own can_use_pidfd() probe must fall back cleanly
+            raise OSError(errno.ENOSYS, 'pidfd_open stubbed')
+        opened.append(pid)
+        return 77
+    monkeypatch.setattr(os, 'pidfd_open', fake_pidfd_open, raising=False)
     monkeypatch.setattr(_runtime_module.signal, 'pidfd_send_signal',
                         lambda fd, sig: sent.append((fd, sig)), raising=False)
     process = _OwnedPopen()
