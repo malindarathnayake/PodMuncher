@@ -804,7 +804,8 @@ def main(argv: list[str] | None = None) -> int:
             digest = check_wheel(wheel_path, Path(args.manifest).read_bytes(), sha256=args.sha256)
             print(f"wheel {wheel_path.name} packages release.json sha256 {digest}")
     except (GateError, ManifestError, p6u5.ReleaseManifestError, OSError, KeyError, ValueError) as error:
-        print(f"::error::release gate failed: {error}", file=sys.stderr)
+        reason = getattr(error, "reason_code", None)
+        print(f"::error::release gate failed: {error}{f' ({reason})' if reason else ''}", file=sys.stderr)
         return 1
     return 0
 
@@ -1078,7 +1079,7 @@ def test_every_published_image_is_pull_verified_scanned_and_has_an_sbom(workflow
         assert "pull-verify" in refs and "--github-output" in refs
     assert sboms == scans == expected
     verify_run = next(s for s in jobs["verify"]["steps"] if s.get("id") == "refs")["run"]
-    assert verify_run.count("pull-verify") == 2 and "published/asr_cpu.json --probe" in verify_run
+    assert verify_run.count("pull-verify") == 2 and "--probe" not in verify_run
     assert "--probe" not in next(s for s in jobs["verify-cuda"]["steps"] if s.get("id") == "refs")["run"]
 
 

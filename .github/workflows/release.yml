@@ -3,7 +3,7 @@
 # Order: gates (tests on the OS/Python matrix, ruff, wheel content) -> config (namespace,
 # version, build-input binding, NVIDIA and GPU gates) -> image builds pushed by digest to the
 # GitHub Container Registry -> multi-arch index merge -> pull-verify by digest on the
-# matching native runner with one bounded probe per ASR image, SBOM and vulnerability scan
+# matching native runner (the ASR probe runs locally at build time), SBOM and vulnerability scan
 # -> finalize a copy of release.json -> wheel built from the tree with the finalized
 # manifest -> clean-venv install matrix -> GitHub Release. Images always come before the
 # wheel. There is no PyPI or other index upload.
@@ -400,7 +400,7 @@ jobs:
           retention-days: 30
 
   verify:
-    name: verify / pull by digest, probe, SBOM, scan (${{ matrix.platform }})
+    name: verify / pull by digest, SBOM, scan (${{ matrix.platform }})
     needs: [config, merge]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -437,7 +437,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pull-verify media and asr_cpu by digest; bounded asr_cpu probe
+      - name: Pull-verify media and asr_cpu by digest
         id: refs
         shell: bash
         env:
@@ -448,7 +448,7 @@ jobs:
             --namespace "$NAMESPACE" --platform "$PLATFORM" --published published/media.json \
             --evidence release-evidence/verify --github-output "$GITHUB_OUTPUT"
           python tests/test_release_gates.py pull-verify --manifest src/podmuncher/manifests/release.json \
-            --namespace "$NAMESPACE" --platform "$PLATFORM" --published published/asr_cpu.json --probe \
+            --namespace "$NAMESPACE" --platform "$PLATFORM" --published published/asr_cpu.json \
             --evidence release-evidence/verify --github-output "$GITHUB_OUTPUT"
       - name: SBOM media
         uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
