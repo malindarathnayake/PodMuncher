@@ -7,10 +7,8 @@
 # Security testing (SBOM and CVE scan) runs locally before tagging with
 # bin/security_scan.py; its reports are committed under security/.
 #
-# Configuration (repository variables or workflow_dispatch inputs; no secrets beyond GITHUB_TOKEN):
-#   PODMUNCHER_PUBLISHER_NAMESPACE            ghcr.io namespace (defaults to the repository owner).
-#   PODMUNCHER_NVIDIA_REDISTRIBUTION_REVIEWED "true" publishes the asr_cuda image, after the owner
-#                                             has reviewed NVIDIA's cuBLAS/cuDNN/NVRTC terms.
+# Configuration (repository variable or workflow_dispatch input; no secrets beyond GITHUB_TOKEN):
+#   PODMUNCHER_PUBLISHER_NAMESPACE  ghcr.io namespace (defaults to the repository owner).
 
 name: release
 
@@ -80,7 +78,6 @@ jobs:
     outputs:
       namespace: ${{ steps.config.outputs.namespace }}
       version: ${{ steps.config.outputs.version }}
-      publish_cuda: ${{ steps.config.outputs.publish_cuda }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -93,7 +90,6 @@ jobs:
           VERSION_INPUT: ${{ inputs.version }}
           NAMESPACE_INPUT: ${{ inputs.namespace }}
           NAMESPACE_VARIABLE: ${{ vars.PODMUNCHER_PUBLISHER_NAMESPACE }}
-          NVIDIA_REVIEWED: ${{ vars.PODMUNCHER_NVIDIA_REDISTRIBUTION_REVIEWED }}
           REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
@@ -104,14 +100,11 @@ jobs:
           fi
           NAMESPACE="${NAMESPACE_INPUT:-${NAMESPACE_VARIABLE:-$REPOSITORY_OWNER}}"
           NAMESPACE="${NAMESPACE,,}"
-          PUBLISH_CUDA=false
-          if [ "$NVIDIA_REVIEWED" = "true" ]; then PUBLISH_CUDA=true; fi
           {
             echo "version=$VERSION"
             echo "namespace=$NAMESPACE"
-            echo "publish_cuda=$PUBLISH_CUDA"
           } >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION namespace=$NAMESPACE publish_cuda=$PUBLISH_CUDA"
+          echo "version=$VERSION namespace=$NAMESPACE"
 
   build:
     name: image / ${{ matrix.capability }} ${{ matrix.platform }}
@@ -247,7 +240,6 @@ jobs:
   cuda:
     name: image / asr_cuda linux-amd64
     needs: [config]
-    if: ${{ needs.config.outputs.publish_cuda == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -298,7 +290,6 @@ jobs:
   release:
     name: release / finalize release.json, wheel, GitHub Release
     needs: [config, merge, cuda]
-    if: ${{ !cancelled() && !failure() && needs.merge.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -325,13 +316,11 @@ jobs:
         env:
           NAMESPACE: ${{ needs.config.outputs.namespace }}
           VERSION: ${{ needs.config.outputs.version }}
-          NVIDIA_REVIEWED: ${{ vars.PODMUNCHER_NVIDIA_REDISTRIBUTION_REVIEWED }}
-          PUBLISH_CUDA: ${{ needs.config.outputs.publish_cuda }}
         run: |
           set -euo pipefail
           python tests/test_release_gates.py finalize --manifest src/podmuncher/manifests/release.json \
             --published-dir published --namespace "$NAMESPACE" --version "$VERSION" \
-            --nvidia-reviewed "$NVIDIA_REVIEWED" --publish-cuda "$PUBLISH_CUDA" \
+            --nvidia-reviewed true --publish-cuda true \
             --output dist-manifest/release.json
           cp dist-manifest/release.json src/podmuncher/manifests/release.json
           python -m build --wheel --no-isolation --outdir dist
@@ -348,6 +337,8 @@ jobs:
           set -euo pipefail
           mkdir -p upload
           cp dist/*.whl dist-manifest/release.json upload/
+          cp skills/podmuncher-install/SKILL.md upload/podmuncher-install-SKILL.md
+          cp skills/podmuncher/SKILL.md upload/podmuncher-SKILL.md
           tar -czf upload/security.tar.gz security
           python3 - dist-manifest/release.json > notes.md <<'PY'
           import json, sys

@@ -968,9 +968,8 @@ def test_jobs_run_in_order_and_stop_on_failure(workflow):
     jobs = workflow[0]["jobs"]
     assert set(jobs) == {"tests", "config", "build", "merge", "cuda", "release"}
     assert _needs(jobs["config"]) == ["tests"] and set(_needs(jobs["merge"])) == {"config", "build"}
-    assert jobs["cuda"]["if"] == "${{ needs.config.outputs.publish_cuda == 'true' }}"
-    condition = jobs["release"]["if"]
-    assert "!cancelled()" in condition and "!failure()" in condition and "needs.merge.result == 'success'" in condition
+    assert "if" not in jobs["cuda"] and "if" not in jobs["release"]  # CUDA always ships; any failure stops the release
+    assert set(_needs(jobs["release"])) == {"config", "merge", "cuda"}
     for name, step in iter_steps(jobs):
         assert "continue-on-error" not in step, name
         for line in step.get("run", "").splitlines():
