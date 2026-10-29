@@ -1690,6 +1690,12 @@ def test_provisioning_pull_release_runs_the_guarded_pull_on_the_loop(
     unbound = bootstrap._Provisioning(ctx, fake_hardware()).pull(Capability.MEDIA)
     assert unbound.ok is False and unbound.reason_code is ReasonCode.ENVELOPE_UNVALIDATED
     assert unbound.next_action == "restart the service, then retry the setup"
+    # A capability the release did not publish (asr_cuda without the NVIDIA review) says so.
+    ctx.manifest = replace(ctx.manifest, capabilities=tuple(
+        c for c in ctx.manifest.capabilities if c.capability is not Capability.ASR_CUDA))
+    missing = bootstrap._Provisioning(ctx, fake_hardware()).pull(Capability.ASR_CUDA)
+    assert missing.ok is False and missing.reason_code is ReasonCode.SERVICE_UNAVAILABLE
+    assert missing.next_action == "this release does not include the asr_cuda image; choose another option"
 
 
 def test_provisioning_pull_development_manifest_is_inspect_only(

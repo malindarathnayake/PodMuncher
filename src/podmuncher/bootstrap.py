@@ -3267,6 +3267,11 @@ class _Provisioning:
 
     def pull(self, capability: Capability) -> Any:
         entry = self._ctx.capability(capability)
+        if entry is None and self._ctx.manifest is not None:
+            # e.g. asr_cuda when the release did not publish the CUDA image.
+            return _step(False, ReasonCode.SERVICE_UNAVAILABLE, data={"capability": str(capability)},
+                         next_action=f"this release does not include the {capability} image; "
+                                     "choose another option")
         if entry is None:
             return self._no_manifest()
         if not self._ctx.manifest.development_fixture:
