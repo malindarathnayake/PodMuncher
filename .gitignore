@@ -37,7 +37,7 @@ release-evidence/
 *.pt
 transcripts/
 models/
-podmuncher-*/
+/podmuncher-*/
 
 # Secrets and machine certificates
 .env
