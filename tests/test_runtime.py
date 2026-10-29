@@ -74,7 +74,7 @@ def make_runtime_storage(tmp_path, **kwargs):
 def test_runtime_storage_sample_budget_is_validated(tmp_path):
     assert make_runtime_storage(tmp_path).sample_budget_seconds == 0.95
     assert make_runtime_storage(tmp_path, sample_budget_seconds=1.45).sample_budget_seconds == 1.45
-    for invalid in (0, -1, 3.01, float('nan'), float('inf'), True, '1', None):
+    for invalid in (0, -1, 10.01, float('nan'), float('inf'), True, '1', None):
         with pytest.raises(RuntimeFailure) as error:
             make_runtime_storage(tmp_path, sample_budget_seconds=invalid)
         assert error.value.reason_code is ReasonCode.INVALID_INPUT

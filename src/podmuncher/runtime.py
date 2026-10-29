@@ -185,7 +185,7 @@ class RuntimeStorage:
                  sample_budget_seconds: float = DEFAULT_SAMPLE_BUDGET_SECONDS):
         if (type(sample_budget_seconds) not in (int, float)
             or not math.isfinite(sample_budget_seconds)
-            or not 0 < sample_budget_seconds <= 3):
+            or not 0 < sample_budget_seconds <= 10):
             raise RuntimeFailure(ReasonCode.INVALID_INPUT)
         if (type(session) is not DockerStorageSession or not session.initial_evidence.can_create_cached
             or set(paths) != {'scratch', 'cache', 'output', 'state'}

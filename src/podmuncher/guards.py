@@ -484,7 +484,7 @@ class WriteGuard:
                  byte_limit: int, timeout_seconds: float,
                  clock: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-                 stale_after_seconds: float = 3, sample_timeout_seconds: float = 1,
+                 stale_after_seconds: float = 10, sample_timeout_seconds: float = 1,
                  cap_reason: ReasonCode = ReasonCode.MEDIA_LIMIT_REACHED):
         if type(byte_limit) is not int or byte_limit < 0:
             raise GuardError(ReasonCode.INVALID_INPUT)

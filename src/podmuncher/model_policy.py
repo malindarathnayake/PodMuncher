@@ -54,6 +54,11 @@ _COMPUTE = {Backend.CUDA: 'int8_float16', Backend.CPU: 'int8'}
 _BASES = frozenset({'published', 'estimated', 'measured'})
 
 
+# Hardware evidence older than this is refused.  Docker Desktop samples take several seconds,
+# so a tighter bound rejects good evidence on Windows and macOS.
+MAX_EVIDENCE_AGE_SECONDS = 10
+
+
 class ModelPolicyError(DomainValidationError):
     def __init__(self, reason_code=ReasonCode.INVALID_INPUT):
         super().__init__(ReasonCode.parse(reason_code))
@@ -533,7 +538,7 @@ def _select(request, evidence, envelopes, table, now, max_age_seconds, lower_tha
     if lower_than is not None and (type(lower_than) is not ModelChoice or request.model != 'auto'):
         raise ModelPolicyError(ReasonCode.MODEL_OOM)
     _seconds(max_age_seconds)
-    if max_age_seconds > 3:
+    if max_age_seconds > MAX_EVIDENCE_AGE_SECONDS:
         raise ModelPolicyError()
     now = datetime.now(UTC) if now is None else now
     if type(now) is not datetime or now.tzinfo is None or now.utcoffset().total_seconds() != 0:
@@ -583,7 +588,7 @@ def _select(request, evidence, envelopes, table, now, max_age_seconds, lower_tha
 
 
 def select_model(request: PolicyRequest, evidence: PolicyEvidence,
-                 envelopes: tuple[MeasuredEnvelope, ...] = (), *, now=None, max_age_seconds=3,
+                 envelopes: tuple[MeasuredEnvelope, ...] = (), *, now=None, max_age_seconds=MAX_EVIDENCE_AGE_SECONDS,
                  lower_than: ModelChoice | None = None, table: HardwareTable | None = None) -> ModelChoice | None:
     """Return an un-loaded candidate; raise a closed reason when none is usable.
 
@@ -672,14 +677,14 @@ class ModelPolicy:
     """
     def __init__(self, envelopes: tuple[MeasuredEnvelope, ...], lifecycle: ModelLifecycle, *,
                  clock=None, monotonic=time.monotonic, callback_timeout_seconds=30,
-                 max_age_seconds=3, table: HardwareTable | None = None):
+                 max_age_seconds=MAX_EVIDENCE_AGE_SECONDS, table: HardwareTable | None = None):
         if type(envelopes) is not tuple or any(type(x) is not MeasuredEnvelope for x in envelopes):
             raise ModelPolicyError()
         if table is not None and type(table) is not HardwareTable:
             raise ModelPolicyError()
         _seconds(callback_timeout_seconds)
         _seconds(max_age_seconds)
-        if callback_timeout_seconds > 300 or max_age_seconds > 3:
+        if callback_timeout_seconds > 300 or max_age_seconds > MAX_EVIDENCE_AGE_SECONDS:
             raise ModelPolicyError()
         self.envelopes, self.lifecycle, self.table = envelopes, lifecycle, table
         self.clock = clock if clock is not None else lambda: datetime.now(UTC)

@@ -1478,7 +1478,7 @@ def test_decision_stamp_does_not_freshen_volume_samples():
 
 def test_slow_final_context_check_cannot_admit_stale_capacity():
     instance, _, _, _ = provider()
-    later = NOW.replace(second=4)
+    later = NOW.replace(second=11)
     times = iter((NOW, later, later))
     instance.clock = lambda: next(times)
     result = instance.sample()
@@ -1529,7 +1529,7 @@ def test_verified_association_uses_layout_completion_time_for_real_plan():
 @pytest.mark.parametrize('slow_stage', ['host', 'context'])
 def test_late_host_or_context_keeps_actual_storage_staleness(slow_stage):
     instance, docker, disks, current = timed_wsl_discovery()
-    late = NOW + timedelta(seconds=7)
+    late = NOW + timedelta(seconds=14)
 
     def host(path):
         disks.paths.append(path)

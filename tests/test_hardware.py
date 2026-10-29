@@ -591,7 +591,7 @@ def test_reader_timeout_uses_shared_deadline_and_original_memory_timestamp():
         def read_memory_cgroup(self, *, deadline):
             return memory
 
-    item = make_sampler(worker=Worker(), clock=lambda: NOW + timedelta(seconds=4)).sample()
+    item = make_sampler(worker=Worker(), clock=lambda: NOW + timedelta(seconds=11)).sample()
     assert item.worker_ram_available.status is FieldStatus.STALE
     assert item.worker_ram_available.sample_time == NOW.isoformat().replace('+00:00', 'Z')
 
@@ -656,7 +656,7 @@ def test_timeout_stale_original_timestamps_and_no_callback_after_deadline():
 
     class AdvancingRunner(FakeRunner):
         def __call__(self, argv, **kwargs):
-            state['time'] += timedelta(seconds=4)
+            state['time'] += timedelta(seconds=11)
             return super().__call__(argv, **kwargs)
 
     item = make_sampler(clock=clock, runner=AdvancingRunner(make_probe_results())).sample()

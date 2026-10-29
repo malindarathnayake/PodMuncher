@@ -1302,8 +1302,8 @@ def test_real_launcher_budgets_the_storage_watchdog_like_the_probe(
         asyncio.run(launcher.run(worker, stage=None, on_event=lambda event: None))
     (storage,) = built
     assert storage["session"] is session and storage["volumes"] is ctx.volumes
-    assert storage["sample_budget_seconds"] == bootstrap.WORKER_STORAGE_SAMPLE_SECONDS == 2.5
-    assert 0.95 < bootstrap.WORKER_STORAGE_SAMPLE_SECONDS <= 3  # above the default, within the cap
+    assert storage["sample_budget_seconds"] == bootstrap.WORKER_STORAGE_SAMPLE_SECONDS == 8.0
+    assert 0.95 < bootstrap.WORKER_STORAGE_SAMPLE_SECONDS <= bootstrap.EVIDENCE_MAX_AGE_SECONDS  # above the default, within the cap
     assert runtime.DEFAULT_SAMPLE_BUDGET_SECONDS == 0.95
     assert closed == [True] and launcher.writers_reaped and not launcher.running
 
@@ -1580,7 +1580,7 @@ def test_launch_port_skips_a_present_image_and_builds_the_guard_otherwise(
                                 "output": Path(ctx.config.paths.output), "state": Path(ctx.state_dir)}
     (cli_, guard, image), = handed
     assert cli_ is holder[0] and image == RELEASE_REF
-    assert guard.timeout_seconds == 42.0 and guard.byte_limit == 0 and guard.sample_timeout_seconds == 2.9
+    assert guard.timeout_seconds == 42.0 and guard.byte_limit == 0 and guard.sample_timeout_seconds == 9.0
     assert type(guard.coordinator) is CancellationCoordinator and guard.coordinator.operation_id.startswith("pull-")
     assert guard.coordinator.stop_grace_seconds == ctx.config.limits.worker_stop_grace_seconds
     assert [c[0] for c in holder[0].calls] == [("image", "inspect", RELEASE_REF)]  # the pre-admission inspect
@@ -1696,6 +1696,24 @@ def test_provisioning_pull_release_runs_the_guarded_pull_on_the_loop(
     missing = bootstrap._Provisioning(ctx, fake_hardware()).pull(Capability.ASR_CUDA)
     assert missing.ok is False and missing.reason_code is ReasonCode.SERVICE_UNAVAILABLE
     assert missing.next_action == "this release does not include the asr_cuda image; choose another option"
+
+
+def test_context_resolves_asr_cuda_with_the_host_gpu(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from podmuncher.runtime import RuntimeFailure
+
+    env = make_bootstrap_env(tmp_path, manifest_doc=with_cuda(make_manifest_doc()))
+    ctx = make_ctx(env, tmp_path)
+    calls: list[int] = []
+    monkeypatch.setattr(bootstrap, "_host_gpu_uuid", lambda: calls.append(1) or GPU_UUID)
+    assert ctx.resolved(Capability.ASR_CUDA).worker_policy.selected_gpu_uuid == GPU_UUID
+    assert ctx.resolved(Capability.ASR_CUDA).worker_policy.selected_gpu_uuid == GPU_UUID
+    assert calls == [1]  # looked up once, then cached
+    assert ctx.resolved(Capability.ASR_CPU).worker_policy.selected_gpu_uuid is None
+    no_gpu = make_ctx(env, tmp_path)
+    monkeypatch.setattr(bootstrap, "_host_gpu_uuid", lambda: None)
+    with pytest.raises(RuntimeFailure) as error:
+        no_gpu.resolved(Capability.ASR_CUDA)
+    assert error.value.reason_code is ReasonCode.GPU_UNAVAILABLE
 
 
 def test_provisioning_pull_development_manifest_is_inspect_only(
@@ -2638,7 +2656,7 @@ def test_probe_failures_are_envelope_unvalidated_and_reaped(tmp_path: Path, case
     elif case == "wrong_device":
         settings["document"] = {**PROBE_DOCUMENT, "device": "cuda"}
     elif case == "stale":
-        settings["stale"] = 5.0  # every sample is older than select_model accepts
+        settings["stale"] = 11.0  # every sample is older than select_model accepts
     else:
         settings.update(hold=0.0, sample_delay=0.2)  # the hold ends while sampling
     _ctx, launch, probe = _probe(env, tmp_path, **settings)

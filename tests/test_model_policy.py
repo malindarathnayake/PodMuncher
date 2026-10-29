@@ -326,7 +326,7 @@ def test_explicit_model_with_auto_device_prefers_visible_gpu_else_cpu():
 def test_explicit_model_still_needs_a_usable_backend():
     on = worker()
     stale = replace(on, hardware=replace(on.hardware, worker_ram_available=measure(
-        GIB, stamp=(NOW - timedelta(seconds=4)).isoformat())))
+        GIB, stamp=(NOW - timedelta(seconds=11)).isoformat())))
     reason(ReasonCode.RAM_INSUFFICIENT, lambda: choose(evidence(stale), model='tiny'))
     reason(ReasonCode.GPU_UNAVAILABLE, lambda: choose(evidence(worker()), model='tiny', device='cuda'))
 
@@ -458,7 +458,7 @@ def test_unknown_and_stale_required_hardware_block_asr(field):
     on = worker()
     original = getattr(on.hardware, field).to_dict()
     for replacement in (measure(None, status=FieldStatus.UNKNOWN),
-                        Measurement.from_dict(original | {'sample_time': (NOW - timedelta(seconds=4)).isoformat()}),
+                        Measurement.from_dict(original | {'sample_time': (NOW - timedelta(seconds=11)).isoformat()}),
                         Measurement.from_dict(original | {'sample_time': (NOW + timedelta(seconds=1)).isoformat()})):
         sample = evidence(replace(on, hardware=replace(on.hardware, **{field: replacement})))
         with pytest.raises(ModelPolicyError):
@@ -489,7 +489,7 @@ def test_runtime_compute_identity_backend_and_timestamp_are_strictly_joined():
            lambda: replace(on, runtime=replace(on.runtime, identity=alien)))
     wrong_types = replace(on, hardware=replace(on.hardware, runtime_compute_types=measure(['float32'])))
     reason(ReasonCode.ENVELOPE_UNVALIDATED, lambda: choose(evidence(wrong_types)))
-    stale = replace(on, runtime_sample_time=(NOW - timedelta(seconds=4)).isoformat())
+    stale = replace(on, runtime_sample_time=(NOW - timedelta(seconds=11)).isoformat())
     reason(ReasonCode.ENVELOPE_UNVALIDATED, lambda: choose(evidence(stale)))
     cuda = worker(Backend.CUDA)
     with pytest.raises(ValueError):
@@ -523,7 +523,7 @@ def test_missing_or_stale_driver_reading_still_blocks_cuda(bad):
     if bad == 'unknown':
         field = measure(None, status=FieldStatus.UNKNOWN)
     else:
-        offset = timedelta(seconds=-4) if bad == 'stale' else timedelta(seconds=1)
+        offset = timedelta(seconds=-11) if bad == 'stale' else timedelta(seconds=1)
         field = measure('synthetic-driver', stamp=(NOW + offset).isoformat())
     sample = evidence(replace(on, hardware=replace(on.hardware, gpu_driver=field)))
     reason(ReasonCode.GPU_UNAVAILABLE, lambda: choose(sample, device='cuda'))
@@ -747,7 +747,7 @@ def test_fresh_complete_readmission_is_required(failure):
     lifecycle = Lifecycle()
     def change(adm):
         if failure == 'stale-storage':
-            return replace(adm, storage=replace(adm.storage, admission=measure(True, stamp=(NOW - timedelta(seconds=4)).isoformat())))
+            return replace(adm, storage=replace(adm.storage, admission=measure(True, stamp=(NOW - timedelta(seconds=11)).isoformat())))
         if failure == 'denied-storage':
             field = Measurement(None, 'synthetic', FieldStatus.ERROR, STAMP, ReasonCode.STORAGE_INSUFFICIENT)
             return replace(adm, storage=replace(adm.storage, admission=field))
@@ -755,7 +755,7 @@ def test_fresh_complete_readmission_is_required(failure):
             return replace(adm, lease_held=1)
         on = adm.evidence.workers[0]
         if failure == 'stale-memory':
-            on = replace(on, hardware=replace(on.hardware, worker_ram_current=measure(0, stamp=(NOW - timedelta(seconds=4)).isoformat())))
+            on = replace(on, hardware=replace(on.hardware, worker_ram_current=measure(0, stamp=(NOW - timedelta(seconds=11)).isoformat())))
         else:
             on = replace(on, fingerprint=replace(on.fingerprint, runtime_version='synthetic-new-runtime'))
         return replace(adm, evidence=evidence(on))

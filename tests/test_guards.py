@@ -505,8 +505,8 @@ async def test_transition_and_publication_each_resample():
 
 @pytest.mark.asyncio
 async def test_stale_and_exact_timeout_refuse_next_write():
-    for now, expected in [(3.001, ReasonCode.STORAGE_STALE), (3, ReasonCode.DOWNLOAD_TIMEOUT)]:
-        guard, clock, lease = setup_guard(timeout=3 if now == 3 else 60)
+    for now, expected in [(10.001, ReasonCode.STORAGE_STALE), (10, ReasonCode.DOWNLOAD_TIMEOUT)]:
+        guard, clock, lease = setup_guard(timeout=10 if now == 10 else 60)
         writer = FakeWriter()
         await guard.start()
         guard.coordinator.register_resource(writer.close)

@@ -136,9 +136,9 @@ PROBE_SAMPLE_SECONDS = 10.0
 # 0.95 s default, so the default latched storage_unknown.  At 1.45 s, 38% of idle samples on
 # this host still ran over (slowest 1.83 s); none of 60 exceeded 2.5 s.  Stays within
 # RuntimeStorage's 3 s cap.
-WORKER_STORAGE_SAMPLE_SECONDS = 2.5
-EVIDENCE_MAX_AGE_SECONDS = 3.0  # model_policy.select_model's own freshness bound
-EVIDENCE_FRESH_SECONDS = 2.75  # older than this at return: one re-sample while still held
+WORKER_STORAGE_SAMPLE_SECONDS = 8.0
+EVIDENCE_MAX_AGE_SECONDS = 10.0  # model_policy.select_model's own freshness bound
+EVIDENCE_FRESH_SECONDS = 8.0  # older than this at return: one re-sample while still held
 SETUP_PROBE_SECONDS = 180.0
 SMOKE_FIXTURE_SECONDS = 2.0
 # Setup PULL of a release image: the configured download timeout, capped here, bounds the
@@ -676,7 +676,15 @@ class _Context:
 
         if self.capability(capability) is None:
             raise RuntimeFailure(ReasonCode.SERVICE_UNAVAILABLE)
-        return resolve_capability(self.manifest, capability)
+        gpu = None
+        if Capability.parse(capability) is Capability.ASR_CUDA:
+            # asr_cuda resolves only with the GPU it runs on (the probe selects the same one).
+            if getattr(self, "_gpu_uuid", None) is None:
+                self._gpu_uuid = _host_gpu_uuid()
+            gpu = self._gpu_uuid
+            if gpu is None:
+                raise RuntimeFailure(ReasonCode.GPU_UNAVAILABLE)
+        return resolve_capability(self.manifest, capability, selected_gpu_uuid=gpu)
 
 
 class _HeldRootVolumes:
@@ -1016,7 +1024,7 @@ async def _started_guard(ctx: _Context, path: str, total: int, *, timeout: float
 
     coordinator = CancellationCoordinator(f"publish-{uuid.uuid4().hex}", _MemoryLease())
     guard = WriteGuard(coordinator, sampler, byte_limit=total, timeout_seconds=timeout,
-                       sample_timeout_seconds=2.9, cap_reason=ReasonCode.EXPORT_LIMIT_REACHED)
+                       sample_timeout_seconds=9.0, cap_reason=ReasonCode.EXPORT_LIMIT_REACHED)
     await guard.start()
     return guard
 
@@ -2116,11 +2124,16 @@ def _parse_probe_artifact(raw: bytes, device: str, gpu_uuid: str | None) -> tupl
     runtime = doc.get("runtime")
     version = runtime.get("version") if type(runtime) is dict else None
     types = doc.get("compute_types")
+    shown_uuid = doc.get("cuda_device_uuid")
+    # Docker Desktop (WSL2) has no /proc/driver/nvidia, so the worker cannot read the GPU UUID
+    # there; it reports None.  The container was started with --gpus device=<gpu_uuid> and
+    # sees only that GPU, so None is accepted for CUDA.  A different UUID is still refused.
+    uuid_ok = shown_uuid == gpu_uuid or (device == "cuda" and gpu_uuid is not None and shown_uuid is None)
     if (type(version) is not str or _VERSION_RE.fullmatch(version) is None
             or type(types) is not list or not 1 <= len(types) <= 16
             or any(type(t) is not str or _COMPUTE_TYPE_RE.fullmatch(t) is None for t in types)
             or len(set(types)) != len(types)
-            or doc.get("device") != device or doc.get("cuda_device_uuid") != gpu_uuid):
+            or doc.get("device") != device or not uuid_ok):
         raise ModelPolicyError(ReasonCode.ENVELOPE_UNVALIDATED)
     return version, tuple(types)
 
@@ -2224,7 +2237,7 @@ class _DockerLaunch:
             coordinator = CancellationCoordinator(f"pull-{uuid.uuid4().hex}", _MemoryLease(),
                                                   stop_grace_seconds=limits.worker_stop_grace_seconds)
             guard = WriteGuard(coordinator, storage.sample, byte_limit=0,
-                               timeout_seconds=float(timeout), sample_timeout_seconds=2.9)
+                               timeout_seconds=float(timeout), sample_timeout_seconds=9.0)
             return await _guarded_pull(cli, guard, image)
         finally:
             await asyncio.to_thread(session.close)
@@ -2253,7 +2266,7 @@ class _DockerLaunch:
             coordinator = CancellationCoordinator(f"probe-{uuid.uuid4().hex}", _MemoryLease(),
                                                   stop_grace_seconds=limits.worker_stop_grace_seconds)
             guard = WriteGuard(coordinator, storage.sample, byte_limit=byte_limit,
-                               timeout_seconds=float(timeout), sample_timeout_seconds=2.9)
+                               timeout_seconds=float(timeout), sample_timeout_seconds=9.0)
             runtime = DockerRuntime(cli, guard, instance=ctx.instance, policy=policy, mounts=mounts)
         except BaseException:
             await asyncio.to_thread(session.close)
@@ -2873,7 +2886,7 @@ class DockerWorkerLauncher:
             byte_limit = limits.media_bytes if remote else limits.export_bytes
             timeout = limits.download_timeout_seconds if remote else limits.decode_timeout_seconds
             guard = WriteGuard(coordinator, storage.sample, byte_limit=byte_limit,
-                               timeout_seconds=float(timeout), sample_timeout_seconds=2.9)
+                               timeout_seconds=float(timeout), sample_timeout_seconds=9.0)
             runtime = DockerRuntime(cli, guard, instance=ctx.instance, policy=policy, mounts=mounts)
             self._active = (runtime, coordinator)
             self._reaped = False

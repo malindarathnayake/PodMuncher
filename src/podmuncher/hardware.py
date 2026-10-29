@@ -782,8 +782,8 @@ class HardwareSampler:
                  virtual_memory=psutil.virtual_memory, cpu_count=psutil.cpu_count,
                  environ: Mapping[str, str] | None = None, platform=os.name,
                  system=host_platform.system, machine=host_platform.machine,
-                 processor=host_platform.processor, timeout=4.0, max_age=3.0):
-        if not _bounded_number(timeout, 1.001, 30) or not _bounded_number(max_age, 0.001, 3):
+                 processor=host_platform.processor, timeout=4.0, max_age=10.0):
+        if not _bounded_number(timeout, 1.001, 30) or not _bounded_number(max_age, 0.001, 10):
             raise ValueError('Invalid sampler bounds')
         if worker is not None and type(getattr(worker, 'identity', None)) is not AdmittedWorkerRef:
             raise ValueError('Admission identity required')

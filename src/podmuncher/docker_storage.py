@@ -478,7 +478,7 @@ class DockerStorageProvider:
     def __init__(self, *, runner=None, volumes=None, platform_provider=None,
                  platform: str = sys.platform, environ: Mapping[str, str] | None = None,
                  clock: Callable[[], datetime] | None = None, timeout: float = 20,
-                 max_age: float = 3):
+                 max_age: float = 10):
         if not 0 < timeout <= 120 or not 0 < max_age <= 60:
             raise ValueError('Invalid discovery bounds')
         self.runner = runner if runner is not None else BoundedRunner()
