@@ -716,6 +716,28 @@ def test_windows_adapter_injected_transport_uses_held_parent():
         adapter.split_absolute('\\\\server\\share\\state')
 
 
+@pytest.mark.skipif(os.name != 'nt', reason='Windows share modes')
+def test_windows_directory_open_waits_out_a_concurrent_holder(tmp_path):
+    import threading
+    import time
+
+    from podmuncher.volumes import _WindowsAPI
+
+    api = _WindowsAPI()
+    first = api.open(str(tmp_path), True)
+    assert api.permissions[first] is True
+    timer = threading.Timer(0.02, api.close, args=(first,))
+    timer.start()
+    began = time.monotonic()
+    second = api.open(str(tmp_path), True)  # collides until the first handle closes
+    try:
+        assert api.permissions[second] is True  # write permission known, not "unknown"
+        assert time.monotonic() - began >= 0.01
+    finally:
+        timer.join()
+        api.close(second)
+
+
 def test_native_capacity_stable_identity_bounded_read(tmp_path):
     target = tmp_path / 'owned.txt'
     target.write_bytes(b'owned tiny transport')

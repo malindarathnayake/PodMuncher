@@ -1113,7 +1113,7 @@ def test_stale_probe_evidence_is_envelope_unvalidated_and_reaped(tmp_path: Path)
     seams, made = make_seams(env, models=None)
     with LoopbackService(env, seams) as svc:
         client = svc.client()
-        made["probe"].stale = 10.0  # every hardware sample is older than select_model accepts
+        made["probe"].stale = 11.0  # every hardware sample is older than select_model accepts
         job = wait_job(client, client.submit(job_request(env), str(uuid.uuid4()))["job"]["job_id"])
         assert job["reason_code"] == "envelope_unvalidated", job
         assert job["state"] in ("failed", "blocked"), job

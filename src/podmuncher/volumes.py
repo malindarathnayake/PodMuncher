@@ -16,6 +16,7 @@ import os
 import re
 import stat
 import sys
+import time
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
@@ -31,6 +32,11 @@ from .domains import (
     ReasonCode,
 )
 from .snapshots import Measurement
+
+# Windows directory opens retry a sharing violation briefly (see WindowsAdapter.open): long
+# enough for another sampler to release the directory, short when a handle is held for good.
+_SHARING_RETRIES = 3
+_SHARING_RETRY_SECONDS = 0.02
 
 
 class StorageError(DomainValidationError):
@@ -712,8 +718,16 @@ class _WindowsAPI:
         # Keep permission evidence on this same handle: a second write-access
         # handle would conflict with our deliberate absence of FILE_SHARE_WRITE.
         permission = None
-        handle = self.k.CreateFileW(path, 0x82 if directory else 0x80000000,
-                                    1, None, 3, 0x00200000 | 0x02000000, None)
+        for attempt in range(_SHARING_RETRIES + 1):
+            handle = self.k.CreateFileW(path, 0x82 if directory else 0x80000000,
+                                        1, None, 3, 0x00200000 | 0x02000000, None)
+            # Two samplers holding the same directory at once (the write guard and an
+            # admission sample) collide on the share mode: ERROR_SHARING_VIOLATION is
+            # transient, so wait for the other handle instead of losing the evidence.
+            if (handle != self.c.c_void_p(-1).value or attempt == _SHARING_RETRIES
+                    or self.c.get_last_error() != 32):
+                break
+            time.sleep(_SHARING_RETRY_SECONDS)
         if directory:
             permission = True
             if handle == self.c.c_void_p(-1).value:

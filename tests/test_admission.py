@@ -243,7 +243,7 @@ def test_unknown_or_stale_required_volume_blocks_first_pull_and_cached_creation(
     assert healthy.admitted
     assert next(x for x in healthy.intervals if x.asset_key == 'image_unpacked').remaining_bytes == (0 if cached else 200)
     assert healthy.volumes[0].required.value == CONTROL_BOUND + WORKER_FLOOR + LOG_FLOOR + (0 if cached else 300)
-    stale = replace(volume, free=m(GIB, stamp=(NOW - timedelta(seconds=4)).isoformat()))
+    stale = replace(volume, free=m(GIB, stamp=(NOW - timedelta(seconds=11)).isoformat()))
     result = plan(stale)
     assert result.reason is ReasonCode.STORAGE_STALE
     unknown = replace(volume, free=m(None, status=FieldStatus.UNKNOWN,
@@ -545,7 +545,7 @@ def test_admission_accepted_domains_reject_shared_contract_negative_examples():
 
 
 def test_plan_preserves_sample_provenance_and_stale_derived_values():
-    old_stamp = (NOW - timedelta(seconds=4)).isoformat()
+    old_stamp = (NOW - timedelta(seconds=11)).isoformat()
     volume = replace(fake_volume('disk', 100, 90),
                      capacity=Measurement(100, 'capacity_probe', FieldStatus.OK, old_stamp, None),
                      free=Measurement(90, 'quota_probe', FieldStatus.OK, old_stamp, None))

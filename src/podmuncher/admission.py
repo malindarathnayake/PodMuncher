@@ -369,7 +369,7 @@ def make_plan(
     config: Config | Limits, *, now: datetime, docker: DockerStorageEvidence | None = None,
     other_active_reservations: Mapping[str, int] | None = None,
     inode_optional_identities: frozenset[str] = frozenset(),
-    max_age_seconds: int = 3,
+    max_age_seconds: int = 10,
     state_evidence: VolumeEvidence | None = None,
 ) -> AdmissionPlan:
     """Plan one operation against each independent physical volume constraint.
@@ -499,7 +499,7 @@ def make_workload_plan(
     other_active_reservations: Mapping[str, int] | None = None,
     inode_optional_identities: frozenset[str] = frozenset(),
     host_growth_fraction: float = 0.10,
-    max_age_seconds: int = 3,
+    max_age_seconds: int = 10,
 ) -> AdmissionPlan:
     """Complete worker plan: fixed floors, stages, Docker proof, and budgets.
 
