@@ -99,6 +99,14 @@ Use `podmuncher COMMAND --help` for details.
 ```
 
 Tests marked `live` need Docker, model files or a GPU and are skipped by the command above.
+
+Before tagging a release, scan the locally built images and commit the reports in `security/`
+(SBOMs and CVE scans):
+
+```sh
+.venv/Scripts/python bin/security_scan.py --platform linux-amd64
+```
+
 Release changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## License

@@ -61,6 +61,7 @@ Podmuncher now works end to end on Windows and on macOS with Apple Silicon: a lo
 - Bounded writes and retries with cleanup limited to owned processes and writes; storage reservations remain held until all outstanding writes are confirmed finished.
 - Workers run in containers with no network access for local processing, a read-only root filesystem and all Linux capabilities dropped; on Linux they run as the invoking user and refuse to run as root, and on Windows they run as a fixed non-root user.
 - Images and models run only when their pinned digests and hashes match.
+- Worker images have no critical CVEs: they use Python 3.12.15 with current Debian security updates, and the media image ships a static FFmpeg 9.0.2 instead of Debian's FFmpeg. SBOMs and CVE scan reports are in `security/`.
 - Model and media downloads must use HTTPS, follow at most 5 redirects, and check every hop and the actual connected server against private, loopback, and reserved addresses.
 - Media downloads have byte and time limits and bounded retries with backoff, and responses whose end cannot be verified are refused because truncation could not be detected.
 - Failed or unknown model files are quarantined and recorded in the audit log.

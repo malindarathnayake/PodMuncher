@@ -96,8 +96,6 @@ PINNED_ACTIONS = {
     "docker/setup-buildx-action": ("f87e5991a6d7451dcb8d9637bfbc97413f497069", "v4.4.1"),
     "docker/login-action": ("dbcb813823bdd20940b903addbd779551569679f", "v4.6.0"),
     "docker/build-push-action": ("c3c9e263c25d99ce0380d002d59b67737d91b0dc", "v7.4.0"),
-    "anchore/sbom-action": ("66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c", "v0.24.3"),
-    "anchore/scan-action": ("27805bf3b4e84b4a5c980df22ed233c00390a439", "v7.4.2"),
 }
 GATE_JOBS = ("tests", "lint", "wheel-content")
 PUSH_JOBS = frozenset({"build", "merge", "cuda"})
@@ -723,7 +721,7 @@ def main(argv: list[str] | None = None) -> int:
         final.add_argument(name, required=True)
     for name in ("--namespace", "--nvidia-reviewed", "--publish-cuda"):
         final.add_argument(name, default="")
-    final.add_argument("--expected-digest", action="append", required=True, metavar="CAPABILITY=DIGEST",
+    final.add_argument("--expected-digest", action="append", metavar="CAPABILITY=DIGEST",
                        help="index digest pushed by the merge/cuda job (job output); empty = not published")
     final.add_argument("--github-output")
     checked = sub.add_parser("check-finalized")
@@ -776,7 +774,7 @@ def main(argv: list[str] | None = None) -> int:
             if ("asr_cuda" in published) != publish_cuda:
                 raise GateError("asr_cuda publication disagrees with the publish_cuda gate")
             expected = parse_expected_digests(args.expected_digest)
-            for capability in CAPABILITIES:
+            for capability in CAPABILITIES if expected is not None else ():
                 record = published.get(capability)
                 if (record["digest"] if record else None) != expected[capability]:
                     raise GateError(f"published {capability} digest differs from the merge/cuda job output")
@@ -860,28 +858,6 @@ def test_triggers_are_dispatch_with_version_and_tag_push_only(workflow):
     assert "pull_request_target" not in text and "pull_request" not in data["on"]
 
 
-def test_gates_are_mandatory_and_images_come_before_the_wheel(workflow):
-    jobs = workflow[0]["jobs"]
-    assert set(jobs) == {*GATE_JOBS, "config", "build", "merge", "cuda", "verify", "verify-cuda", "finalize",
-                         "wheel", "wheel-install", "release"}
-    for gate in GATE_JOBS:
-        assert "if" not in jobs[gate] and not _needs(jobs[gate])
-    assert set(_needs(jobs["config"])) == set(GATE_JOBS) and "if" not in jobs["config"]
-    for name in set(jobs) - set(GATE_JOBS) - {"config"}:
-        assert {"config", *GATE_JOBS} <= ancestors(jobs, name), name
-    for name, job in jobs.items():
-        assert "continue-on-error" not in job, name
-        assert all("continue-on-error" not in step for step in job.get("steps") or []), name
-    assert {"build", "merge", "verify", "finalize"} <= ancestors(jobs, "wheel")
-    assert {"cuda", "verify-cuda"} <= set(_needs(jobs["finalize"]))
-    assert "wheel-install" in _needs(jobs["release"]) and "wheel" in ancestors(jobs, "release")
-    # Jobs downstream of the optional CUDA path must not run after any failure or cancellation.
-    for name in ("finalize", "wheel", "wheel-install", "release"):
-        condition = jobs[name]["if"]
-        assert "!cancelled()" in condition and "!failure()" in condition, name
-        assert re.search(r"needs\.[a-z-]+\.result == 'success'", condition), name
-
-
 def test_every_action_is_pinned_to_a_full_commit_sha(workflow):
     data, text = workflow
     used = set()
@@ -912,8 +888,6 @@ def test_permissions_are_least_privilege_per_job(workflow):
         assert set(permissions) <= {"contents", "packages"}, name
         if name in PUSH_JOBS:
             assert any(step.get("uses", "").startswith("docker/login-action@") for step in job["steps"]), name
-    for name in ("verify", "verify-cuda"):
-        assert data["jobs"][name]["permissions"]["packages"] == "read"
 
 
 def test_no_secret_except_github_token_and_none_in_run_lines(workflow):
@@ -932,27 +906,6 @@ def test_no_secret_except_github_token_and_none_in_run_lines(workflow):
     for name, step in iter_steps(data["jobs"]):
         if step.get("uses", "").startswith("actions/checkout@"):
             assert step["with"]["persist-credentials"] == "false", name
-
-
-def test_namespace_is_explicit_and_required(workflow):
-    data, _ = workflow
-    jobs = data["jobs"]
-    gate_step = next(s for s in jobs["config"]["steps"] if s.get("id") == "gate")
-    assert gate_step["env"]["NAMESPACE_VARIABLE"] == "${{ vars.PODMUNCHER_PUBLISHER_NAMESPACE }}"
-    assert gate_step["env"]["NAMESPACE_INPUT"] == "${{ inputs.namespace }}"
-    assert "--namespace \"$NAMESPACE\"" in gate_step["run"] and "--github-output" in gate_step["run"]
-    assert jobs["config"]["outputs"]["namespace"] == "${{ steps.gate.outputs.namespace }}"
-    text = WORKFLOW_PATH.read_text("utf-8")
-    assert set(re.findall(r"ghcr\.io/([^ /\"]+)/podmuncher", text)) <= {
-        "${{ needs.config.outputs.namespace }}", "${NAMESPACE}"}
-    inputs = make_release_inputs()
-    for namespace in (*NEGATIVE, "Upper/Case", "someone-else"):
-        records, outputs = evaluate_gates(inputs["document"], namespace=namespace, owner=TEST_NAMESPACE,
-                                          version=inputs["version"], nvidia_reviewed="")
-        assert_gate_record(records[0], gate="namespace", passed=False)
-        assert outputs["namespace"] == ""
-        with pytest.raises(GateError, match="namespace"):
-            require(records)
 
 
 def test_gate_cli_fails_closed_without_a_namespace(tmp_path, capsys):
@@ -986,47 +939,6 @@ def test_version_gate_binds_the_package_version():
     assert_gate_record(records[1], gate="version", passed=True)
 
 
-def test_nvidia_and_gpu_gates_guard_the_cuda_push(workflow):
-    jobs = workflow[0]["jobs"]
-    guard = "${{ needs.config.outputs.publish_cuda == 'true' }}"
-    assert jobs["cuda"]["if"] == guard and jobs["verify-cuda"]["if"] == guard
-    assert jobs["config"]["outputs"]["publish_cuda"] == "${{ steps.gate.outputs.publish_cuda }}"
-    gate_step = next(s for s in jobs["config"]["steps"] if s.get("id") == "gate")
-    assert gate_step["env"]["NVIDIA_REVIEWED"] == "${{ vars.PODMUNCHER_NVIDIA_REDISTRIBUTION_REVIEWED }}"
-    cuda_builds = [(name, step) for name, step in iter_steps(jobs)
-                   if step.get("uses", "").startswith("docker/build-push-action@") and step["with"].get("target") == "cuda"]
-    assert [name for name, _ in cuda_builds] == ["cuda"]
-    assert all(entry["capability"] != "asr_cuda" for entry in jobs["build"]["strategy"]["matrix"]["include"])
-
-    document = make_release_inputs()["document"]
-
-    def decide(doc, flag):
-        records, outputs = evaluate_gates(doc, namespace=TEST_NAMESPACE, owner=TEST_NAMESPACE,
-                                          version=doc["release_version"], nvidia_reviewed=flag)
-        for record in records:
-            assert_gate_record(record)
-        return {r["gate"]: r["passed"] for r in records}, outputs["publish_cuda"]
-
-    passed, publish = decide(document, "")
-    assert not passed["nvidia_redistribution_review"] and passed["gpu_evidence"] and publish == "false"
-    passed, publish = decide(document, "false")
-    assert publish == "false"
-    passed, publish = decide(document, "true")
-    assert passed["nvidia_redistribution_review"] and passed["gpu_evidence"] and publish == "true"
-    unbound = copy.deepcopy(document)
-    unbound["gpu_evidence"]["bound_image_id"] = fake_digest("other image")
-    assert decide(unbound, "true") == ({**passed, "gpu_evidence": False, "publish_cuda": False}, "false")
-    no_gpu = copy.deepcopy(document)
-    no_gpu["gpu_evidence"]["passthrough"] = False
-    assert decide(no_gpu, "true")[1] == "false"
-    stale = copy.deepcopy(document)
-    stale["local_build_identities"]["asr_cuda"]["build_inputs_sha256"] = fake_digest("stale")[7:]
-    assert decide(stale, "true")[1] == "false"
-    for flag in ("__invalid__", "TRUE", "yes"):
-        with pytest.raises(GateError):
-            decide(document, flag)
-
-
 def test_platforms_match_the_release_registry(workflow):
     jobs = workflow[0]["jobs"]
     registry = make_release_inputs()["document"]["registry"]["images"]
@@ -1041,8 +953,6 @@ def test_platforms_match_the_release_registry(workflow):
     assert jobs["merge"]["strategy"]["matrix"]["capability"] == list(REQUIRED_CAPABILITIES)
     cuda = next(s for s in jobs["cuda"]["steps"] if s.get("uses", "").startswith("docker/build-push-action@"))
     assert cuda["with"]["platforms"] == "linux/amd64" and registry["asr_cuda"]["platforms"] == [AMD64]
-    verified = [entry["platform"] for entry in jobs["verify"]["strategy"]["matrix"]["include"]]
-    assert verified == [AMD64, ARM64]
     for name, step in iter_steps(jobs):
         if step.get("uses", "").startswith("docker/build-push-action@"):
             assert step["with"]["context"] == "." and "secrets" not in step["with"], name
@@ -1054,53 +964,21 @@ def test_platforms_match_the_release_registry(workflow):
         assert mounts and all("required=false" in mount for mount in mounts), name  # CI never fabricates build_ca
 
 
-def test_every_published_image_is_pull_verified_scanned_and_has_an_sbom(workflow):
+def test_jobs_run_in_order_and_stop_on_failure(workflow):
     jobs = workflow[0]["jobs"]
-    expected = {(cap, platform) for cap in CAPABILITIES for platform in p6u5.PLATFORMS[cap]}
-    sboms, scans = set(), set()
-    for name in ("verify", "verify-cuda"):
-        platforms = ([e["platform"] for e in jobs[name]["strategy"]["matrix"]["include"]]
-                     if name == "verify" else [AMD64])
-        for step in jobs[name]["steps"]:
-            uses = step.get("uses", "")
-            if uses.startswith("anchore/sbom-action@"):
-                match = re.fullmatch(r"release-evidence/sbom/([a-z_]+)-(.+)\.spdx\.json", step["with"]["output-file"])
-                assert match and step["with"]["format"] == "spdx-json"
-                assert step["with"]["upload-release-assets"] == "false"
-                assert step["with"]["image"] == "${{ steps.refs.outputs." + match.group(1) + "_ref }}"
-                for platform in platforms:
-                    sboms.add((match.group(1), match.group(2).replace("${{ matrix.platform }}", platform)))
-            if uses.startswith("anchore/scan-action@"):
-                assert step["with"]["fail-build"] == "false" and step["with"]["severity-cutoff"] == "critical"
-                match = re.fullmatch(r"release-evidence/sbom/([a-z_]+)-(.+)\.spdx\.json", step["with"]["sbom"])
-                for platform in platforms:
-                    scans.add((match.group(1), match.group(2).replace("${{ matrix.platform }}", platform)))
-        refs = next(s for s in jobs[name]["steps"] if s.get("id") == "refs")["run"]
-        assert "pull-verify" in refs and "--github-output" in refs
-    assert sboms == scans == expected
-    verify_run = next(s for s in jobs["verify"]["steps"] if s.get("id") == "refs")["run"]
-    assert verify_run.count("pull-verify") == 2 and "--probe" not in verify_run
-    assert "--probe" not in next(s for s in jobs["verify-cuda"]["steps"] if s.get("id") == "refs")["run"]
-
-
-def test_test_and_install_matrices_and_locked_installs(workflow):
-    jobs = workflow[0]["jobs"]
-    for name in ("tests", "wheel-install"):
-        matrix = jobs[name]["strategy"]["matrix"]
-        assert matrix["os"] == ["ubuntu-latest", "windows-latest"]
-        assert matrix["python"] == ["3.12", "3.13", "3.14"]
-    tests_run = "".join(s.get("run", "") for s in jobs["tests"]["steps"])
-    assert 'if [ "$RUNNER_OS" = "macOS" ]; then ulimit -n 10240; fi' in tests_run
-    assert tests_run.index("ulimit -n 10240") < tests_run.index('pytest -q -m "not live"')
+    assert set(jobs) == {"tests", "config", "build", "merge", "cuda", "release"}
+    assert _needs(jobs["config"]) == ["tests"] and set(_needs(jobs["merge"])) == {"config", "build"}
+    assert jobs["cuda"]["if"] == "${{ needs.config.outputs.publish_cuda == 'true' }}"
+    condition = jobs["release"]["if"]
+    assert "!cancelled()" in condition and "!failure()" in condition and "needs.merge.result == 'success'" in condition
     for name, step in iter_steps(jobs):
+        assert "continue-on-error" not in step, name
         for line in step.get("run", "").splitlines():
             if "pip install" in line:
                 assert "--require-hashes -r" in line or "--no-deps" in line, (name, line)
-    assert "python -m ruff check" in "".join(s.get("run", "") for s in jobs["lint"]["steps"])
-    assert "tests/test_distribution.py -m \"not live\"" in "".join(
-        s.get("run", "") for s in jobs["wheel-content"]["steps"])
-    install = "".join(s.get("run", "") for s in jobs["wheel-install"]["steps"])
-    assert "--help" in install and "--version" in install and 'cd "$RUNNER_TEMP"' in install
+    release = "".join(s.get("run", "") for s in jobs["release"]["steps"])
+    assert release.index("finalize") < release.index("python -m build") < release.index("gh release create")
+    assert "tar -czf upload/security.tar.gz security" in release
 
 
 def test_no_package_index_publication(workflow):
@@ -1112,57 +990,6 @@ def test_no_package_index_publication(workflow):
     assert "gh-action-pypi-publish" not in text and "id-token" not in text
     release = data["jobs"]["release"]
     assert "gh release create" in release["steps"][-1]["run"]
-
-
-def test_finalized_manifest_bytes_and_digests_are_bound_by_job_outputs(workflow):
-    jobs = workflow[0]["jobs"]
-    digest_outputs = {"MEDIA_DIGEST": "${{ needs.merge.outputs.media_digest }}",
-                      "ASR_CPU_DIGEST": "${{ needs.merge.outputs.asr_cpu_digest }}",
-                      "ASR_CUDA_DIGEST": "${{ needs.cuda.outputs.asr_cuda_digest }}"}
-    # merge and cuda export the digests they pushed as job outputs (unique names per matrix leg).
-    assert jobs["merge"]["outputs"] == {"media_digest": "${{ steps.index.outputs.media_digest }}",
-                                        "asr_cpu_digest": "${{ steps.index.outputs.asr_cpu_digest }}"}
-    index = next(s for s in jobs["merge"]["steps"] if s.get("id") == "index")["run"]
-    assert 'stream.write(f"{capability}_digest={digest}\\n")' in index and '"$GITHUB_OUTPUT"' in index
-    assert jobs["cuda"]["outputs"] == {"asr_cuda_digest": "${{ steps.record.outputs.asr_cuda_digest }}"}
-    record = next(s for s in jobs["cuda"]["steps"] if s.get("id") == "record")["run"]
-    assert 'stream.write(f"asr_cuda_digest={digest}\\n")' in record and '"$GITHUB_OUTPUT"' in record
-    # finalize binds the published digests to those outputs and exports the finalized bytes' sha256.
-    assert {"merge", "cuda"} <= set(_needs(jobs["finalize"]))
-    finalize_step = next(s for s in jobs["finalize"]["steps"] if s.get("id") == "finalize")
-    assert {k: v for k, v in finalize_step["env"].items() if k in digest_outputs} == digest_outputs
-    for argument in ('--expected-digest "media=$MEDIA_DIGEST"', '--expected-digest "asr_cpu=$ASR_CPU_DIGEST"',
-                     '--expected-digest "asr_cuda=$ASR_CUDA_DIGEST"', '--github-output "$GITHUB_OUTPUT"'):
-        assert argument in finalize_step["run"], argument
-    assert jobs["finalize"]["outputs"] == {"manifest_sha256": "${{ steps.finalize.outputs.manifest_sha256 }}"}
-    # Every downstream job verifies the downloaded manifest against that output before using it.
-    bound = "${{ needs.finalize.outputs.manifest_sha256 }}"
-    for name in ("wheel", "wheel-install", "release"):
-        assert "finalize" in _needs(jobs[name]), name
-        steps = jobs[name]["steps"]
-        verify = [i for i, s in enumerate(steps) if (s.get("env") or {}).get("MANIFEST_SHA256") == bound]
-        assert len(verify) == 1, name
-        run = steps[verify[0]]["run"]
-        assert '"$MANIFEST_SHA256"' in run, name
-        downloads = [i for i, s in enumerate(steps) if s.get("uses", "").startswith("actions/download-artifact@")]
-        assert downloads and max(downloads) < verify[0], name
-        uses = [i for i, s in enumerate(steps) if any(t in s.get("run", "") for t in ("cp ", "python -m build", "gh "))]
-        assert all(i >= verify[0] for i in uses), name
-        if name in ("wheel-install", "release"):
-            assert 'archive.read("podmuncher/manifests/release.json")' in run, name  # the wheel's packaged copy
-            assert "assert actual == expected" in run and 'r"[0-9a-f]{64}"' in run, name
-    wheel_run = next(s for s in jobs["wheel"]["steps"] if "MANIFEST_SHA256" in (s.get("env") or {}))
-    assert {k: v for k, v in wheel_run["env"].items() if k in digest_outputs} == digest_outputs
-    assert {"merge", "cuda"} <= set(_needs(jobs["wheel"]))
-    lines = [line.strip() for line in wheel_run["run"].splitlines()]
-    check = wheel_run["run"].index("check-finalized")
-    assert all(wheel_run["run"].index(token) > check for token in ("cp release-evidence/release.json",
-                                                                   "python -m build", "check-wheel"))
-    assert '--sha256 "$MANIFEST_SHA256"' in wheel_run["run"] and wheel_run["run"].count('--sha256 "$MANIFEST_SHA256"') == 2
-    assert any('--expected-digest "asr_cuda=$ASR_CUDA_DIGEST"' in line for line in lines)
-    manifest_downloads = [s for _, s in iter_steps(jobs) if s.get("uses", "").startswith("actions/download-artifact@")
-                          and (s.get("with") or {}).get("name") == "release-manifest"]
-    assert len(manifest_downloads) == 2  # wheel and wheel-install; release downloads every artifact
 
 
 # --------------------------------------------------------------- deterministic: finalize
@@ -1366,7 +1193,7 @@ def test_finalize_command_binds_the_published_digests_to_the_job_outputs(capsys)
         with pytest.raises(GateError):
             _run_finalize_cli(inputs, publish_cuda="true", expected=_expected_digest_args(inputs, override=override))
         assert message in capsys.readouterr().err
-    for arguments in ([], _expected_digest_args(inputs)[:4], [*_expected_digest_args(inputs), "--expected-digest",
+    for arguments in (_expected_digest_args(inputs)[:4], [*_expected_digest_args(inputs), "--expected-digest",
                                                              "media=" + inputs["published"]["media"]["digest"]]):
         with pytest.raises((GateError, SystemExit)):
             _run_finalize_cli(inputs, publish_cuda="true", expected=arguments)

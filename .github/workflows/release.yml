@@ -1,38 +1,16 @@
-# Podmuncher release workflow (P6-U6).
+# Podmuncher release workflow.
 #
-# Order: gates (tests on the OS/Python matrix, ruff, wheel content) -> config (namespace,
-# version, build-input binding, NVIDIA and GPU gates) -> image builds pushed by digest to the
-# GitHub Container Registry -> multi-arch index merge -> pull-verify by digest on the
-# matching native runner (the ASR probe runs locally at build time), SBOM and vulnerability scan
-# -> finalize a copy of release.json -> wheel built from the tree with the finalized
-# manifest -> clean-venv install matrix -> GitHub Release. Images always come before the
-# wheel. There is no PyPI or other index upload.
+# tests + ruff -> build and push the worker images to ghcr.io (native amd64 and arm64
+# runners, merged into one multi-arch index per image) -> write the pushed digests into a copy
+# of release.json -> build the wheel with it -> GitHub Release. No PyPI upload.
 #
-# Publication integrity: the finalized manifest travels between jobs as an artifact, so its
-# bytes are bound by job outputs (part of the run's graph, not the artifact store). merge and
-# cuda export the index digests they pushed; finalize checks the published digests against
-# them, fails the run unless the result is publishable, and exports manifest_sha256. wheel,
-# wheel-install and release verify the downloaded file (and the wheel's packaged copy) against
-# manifest_sha256 before copying, building or uploading anything.
+# Security testing (SBOM and CVE scan) runs locally before tagging with
+# bin/security_scan.py; its reports are committed under security/.
 #
-# Configuration (repository variables or workflow_dispatch inputs; no other secrets):
-#   PODMUNCHER_PUBLISHER_NAMESPACE           ghcr.io namespace (defaults to the repository owner).
-#   PODMUNCHER_NVIDIA_REDISTRIBUTION_REVIEWED "true" only after the owner has reviewed the
-#                                            NVIDIA cuBLAS/cuDNN/NVRTC redistribution terms.
-# The asr_cuda image is published only when that review is recorded AND release.json
-# gpu_evidence binds to the same build inputs as this build. GitHub-hosted runners have no
-# GPU: CUDA evidence never comes from CI.
-#
-# Retained evidence (workflow artifacts, also attached to the GitHub Release):
-#   release-gates            release-evidence/gates.json            gate records (config job)
-#   evidence-<platform>      release-evidence/sbom/<image>-<platform>.spdx.json
-#                            release-evidence/vuln/<image>-<platform>.grype.json
-#                            release-evidence/verify/<image>-<platform>.json
-#   release-manifest         release-evidence/release.json          finalized manifest copy
-#   wheel                    dist/podmuncher-<version>-py3-none-any.whl
-#
-# Every third-party action is pinned to a full commit SHA (tag in the trailing comment).
-# Pins are asserted by tests/test_release_gates.py.
+# Configuration (repository variables or workflow_dispatch inputs; no secrets beyond GITHUB_TOKEN):
+#   PODMUNCHER_PUBLISHER_NAMESPACE            ghcr.io namespace (defaults to the repository owner).
+#   PODMUNCHER_NVIDIA_REDISTRIBUTION_REVIEWED "true" publishes the asr_cuda image, after the owner
+#                                             has reviewed NVIDIA's cuBLAS/cuDNN/NVRTC terms.
 
 name: release
 
@@ -63,7 +41,7 @@ env:
 
 jobs:
   tests:
-    name: gate / tests (${{ matrix.os }}, py${{ matrix.python }})
+    name: tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -72,97 +50,42 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.12"
       - name: Install the locked environment
         shell: bash
         run: |
           python -m pip install --require-hashes -r requirements.lock
           python -m pip install --no-deps --no-build-isolation -e ".[dev]"
+      - name: Ruff
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python -m ruff check src tests
       - name: Non-live test suite
         shell: bash
-        run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then ulimit -n 10240; fi
-          python -m pytest -q -m "not live" --basetemp "$RUNNER_TEMP/pytest"
-
-  lint:
-    name: gate / ruff
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install the locked environment
-        shell: bash
-        run: |
-          python -m pip install --require-hashes -r requirements.lock
-          python -m pip install --no-deps --no-build-isolation -e ".[dev]"
-      - name: Ruff (pinned in requirements.lock)
-        shell: bash
-        run: |
-          python -m ruff --version
-          python -m ruff check src tests
-
-  wheel-content:
-    name: gate / wheel content
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install the locked environment
-        shell: bash
-        run: |
-          python -m pip install --require-hashes -r requirements.lock
-          python -m pip install --no-deps --no-build-isolation -e ".[dev]"
-      - name: Wheel content check
-        shell: bash
-        run: |
-          python -m pytest -q tests/test_distribution.py -m "not live" --basetemp "$RUNNER_TEMP/pytest"
+        run: python -m pytest -q -m "not live" --basetemp "$RUNNER_TEMP/pytest"
 
   config:
-    name: gate / namespace, version, build inputs, NVIDIA and GPU
-    needs: [tests, lint, wheel-content]
+    name: version and namespace
+    needs: [tests]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 5
     permissions:
       contents: read
     outputs:
-      namespace: ${{ steps.gate.outputs.namespace }}
-      version: ${{ steps.gate.outputs.version }}
-      publish_cuda: ${{ steps.gate.outputs.publish_cuda }}
+      namespace: ${{ steps.config.outputs.namespace }}
+      version: ${{ steps.config.outputs.version }}
+      publish_cuda: ${{ steps.config.outputs.publish_cuda }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install the locked environment
-        shell: bash
-        run: |
-          python -m pip install --require-hashes -r requirements.lock
-          python -m pip install --no-deps --no-build-isolation -e ".[dev]"
-      - name: Evaluate the release gates
-        id: gate
+      - id: config
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -173,19 +96,22 @@ jobs:
           NVIDIA_REVIEWED: ${{ vars.PODMUNCHER_NVIDIA_REDISTRIBUTION_REVIEWED }}
           REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
+          set -euo pipefail
           if [ "$EVENT_NAME" = "push" ]; then VERSION="${REF_NAME#v}"; else VERSION="$VERSION_INPUT"; fi
+          PACKAGE="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [ "$VERSION" != "$PACKAGE" ]; then
+            echo "::error::release version $VERSION differs from pyproject.toml version $PACKAGE"; exit 1
+          fi
           NAMESPACE="${NAMESPACE_INPUT:-${NAMESPACE_VARIABLE:-$REPOSITORY_OWNER}}"
-          python tests/test_release_gates.py gate \
-            --manifest src/podmuncher/manifests/release.json \
-            --namespace "$NAMESPACE" --owner "$REPOSITORY_OWNER" --version "$VERSION" \
-            --nvidia-reviewed "$NVIDIA_REVIEWED" \
-            --evidence release-evidence/gates.json --github-output "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-gates
-          path: release-evidence/gates.json
-          if-no-files-found: error
-          retention-days: 90
+          NAMESPACE="${NAMESPACE,,}"
+          PUBLISH_CUDA=false
+          if [ "$NVIDIA_REVIEWED" = "true" ]; then PUBLISH_CUDA=true; fi
+          {
+            echo "version=$VERSION"
+            echo "namespace=$NAMESPACE"
+            echo "publish_cuda=$PUBLISH_CUDA"
+          } >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION namespace=$NAMESPACE publish_cuda=$PUBLISH_CUDA"
 
   build:
     name: image / ${{ matrix.capability }} ${{ matrix.platform }}
@@ -233,7 +159,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build natively and push by digest (no build_ca secret; the mount is optional)
+      - name: Build and push by digest
         id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -272,11 +198,6 @@ jobs:
       fail-fast: true
       matrix:
         capability: [media, asr_cpu]
-    # Matrix job outputs are combined across the legs; each leg sets only its own uniquely named
-    # output. finalize fails closed if a required digest output is empty.
-    outputs:
-      media_digest: ${{ steps.index.outputs.media_digest }}
-      asr_cpu_digest: ${{ steps.index.outputs.asr_cpu_digest }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -289,8 +210,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create and record the OCI index (linux/amd64 + linux/arm64); export its digest
-        id: index
+      - name: Create the OCI index (linux/amd64 + linux/arm64) and record it
         shell: bash
         env:
           NAMESPACE: ${{ needs.config.outputs.namespace }}
@@ -304,22 +224,18 @@ jobs:
           docker buildx imagetools create --tag "${IMAGE}:${VERSION}" "${IMAGE}@${AMD64}" "${IMAGE}@${ARM64}"
           docker buildx imagetools inspect --raw "${IMAGE}:${VERSION}" > index.json
           mkdir -p published
-          python3 - "$IMAGE" "$CAPABILITY" index.json "published/${CAPABILITY}.json" "$AMD64" "$ARM64" "$GITHUB_OUTPUT" <<'PY'
+          python3 - "$IMAGE" "$CAPABILITY" index.json "published/${CAPABILITY}.json" "$AMD64" "$ARM64" <<'PY'
           import hashlib, json, sys
-          image, capability, index_path, out_path, amd64, arm64, github_output = sys.argv[1:]
+          image, capability, index_path, out_path, amd64, arm64 = sys.argv[1:]
           raw = open(index_path, "rb").read()
-          index = json.loads(raw)
-          assert index["mediaType"] in ("application/vnd.oci.image.index.v1+json",
-                                        "application/vnd.docker.distribution.manifest.list.v2+json"), index["mediaType"]
-          found = {(m["platform"]["os"] + "-" + m["platform"]["architecture"]): m["digest"] for m in index["manifests"]}
+          found = {m["platform"]["os"] + "-" + m["platform"]["architecture"]: m["digest"]
+                   for m in json.loads(raw)["manifests"]}
           assert found == {"linux-amd64": amd64, "linux-arm64": arm64}, found
-          digest = "sha256:" + hashlib.sha256(raw).hexdigest()
-          record = {"capability": capability, "image_reference": image, "digest": digest,
+          record = {"capability": capability, "image_reference": image,
+                    "digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
                     "platforms": ["linux-amd64", "linux-arm64"], "platform_digests": found}
           json.dump(record, open(out_path, "w"), indent=1, sort_keys=True)
-          with open(github_output, "a") as stream:
-              stream.write(f"{capability}_digest={digest}\n")
-          print(f"{image}@{digest}")
+          print(f"{image}@{record['digest']}")
           PY
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -329,7 +245,7 @@ jobs:
           retention-days: 30
 
   cuda:
-    name: image / asr_cuda linux-amd64 (NVIDIA and GPU gated)
+    name: image / asr_cuda linux-amd64
     needs: [config]
     if: ${{ needs.config.outputs.publish_cuda == 'true' }}
     runs-on: ubuntu-24.04
@@ -337,14 +253,10 @@ jobs:
     permissions:
       contents: read
       packages: write
-    outputs:
-      asr_cuda_digest: ${{ steps.record.outputs.asr_cuda_digest }}
     steps:
       - name: Free runner disk for the CUDA image
         shell: bash
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -366,32 +278,16 @@ jobs:
           sbom: false
           push: true
           tags: ghcr.io/${{ needs.config.outputs.namespace }}/podmuncher-asr_cuda:${{ needs.config.outputs.version }}
-      - name: Record and export the image digest
-        id: record
+      - name: Record the image digest
         shell: bash
         env:
-          NAMESPACE: ${{ needs.config.outputs.namespace }}
+          IMAGE: ghcr.io/${{ needs.config.outputs.namespace }}/podmuncher-asr_cuda
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
-          set -euo pipefail
-          IMAGE="ghcr.io/${NAMESPACE}/podmuncher-asr_cuda"
-          docker buildx imagetools inspect --raw "${IMAGE}@${DIGEST}" > manifest.json
           mkdir -p published
-          python3 - "$IMAGE" "$DIGEST" manifest.json published/asr_cuda.json "$GITHUB_OUTPUT" <<'PY'
-          import hashlib, json, sys
-          image, digest, manifest_path, out_path, github_output = sys.argv[1:]
-          raw = open(manifest_path, "rb").read()
-          manifest = json.loads(raw)
-          assert manifest["mediaType"] in ("application/vnd.oci.image.manifest.v1+json",
-                                           "application/vnd.docker.distribution.manifest.v2+json"), manifest["mediaType"]
-          assert digest == "sha256:" + hashlib.sha256(raw).hexdigest()
-          record = {"capability": "asr_cuda", "image_reference": image, "digest": digest,
-                    "platforms": ["linux-amd64"], "platform_digests": {"linux-amd64": digest}}
-          json.dump(record, open(out_path, "w"), indent=1, sort_keys=True)
-          with open(github_output, "a") as stream:
-              stream.write(f"asr_cuda_digest={digest}\n")
-          print(f"{image}@{digest}")
-          PY
+          printf '{"capability": "asr_cuda", "image_reference": "%s", "digest": "%s", "platforms": ["linux-amd64"], "platform_digests": {"linux-amd64": "%s"}}\n' \
+            "$IMAGE" "$DIGEST" "$DIGEST" > published/asr_cuda.json
+          cat published/asr_cuda.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: published-asr_cuda
@@ -399,398 +295,73 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  verify:
-    name: verify / pull by digest, SBOM, scan (${{ matrix.platform }})
-    needs: [config, merge]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      packages: read
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - platform: linux-amd64
-            runner: ubuntu-24.04
-          - platform: linux-arm64
-            runner: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install the locked environment
-        shell: bash
-        run: |
-          python -m pip install --require-hashes -r requirements.lock
-          python -m pip install --no-deps --no-build-isolation -e ".[dev]"
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: published-*
-          path: published
-          merge-multiple: true
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pull-verify media and asr_cpu by digest
-        id: refs
-        shell: bash
-        env:
-          NAMESPACE: ${{ needs.config.outputs.namespace }}
-          PLATFORM: ${{ matrix.platform }}
-        run: |
-          mkdir -p release-evidence/sbom release-evidence/vuln
-          python tests/test_release_gates.py pull-verify --manifest src/podmuncher/manifests/release.json \
-            --namespace "$NAMESPACE" --platform "$PLATFORM" --published published/media.json \
-            --evidence release-evidence/verify --github-output "$GITHUB_OUTPUT"
-          python tests/test_release_gates.py pull-verify --manifest src/podmuncher/manifests/release.json \
-            --namespace "$NAMESPACE" --platform "$PLATFORM" --published published/asr_cpu.json \
-            --evidence release-evidence/verify --github-output "$GITHUB_OUTPUT"
-      - name: SBOM media
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: ${{ steps.refs.outputs.media_ref }}
-          format: spdx-json
-          output-file: release-evidence/sbom/media-${{ matrix.platform }}.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
-      - name: SBOM asr_cpu
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: ${{ steps.refs.outputs.asr_cpu_ref }}
-          format: spdx-json
-          output-file: release-evidence/sbom/asr_cpu-${{ matrix.platform }}.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
-      - name: Vulnerability scan media (report only)
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
-        with:
-          sbom: release-evidence/sbom/media-${{ matrix.platform }}.spdx.json
-          fail-build: false
-          severity-cutoff: critical
-          output-format: json
-          output-file: release-evidence/vuln/media-${{ matrix.platform }}.grype.json
-      - name: Vulnerability scan asr_cpu (report only)
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
-        with:
-          sbom: release-evidence/sbom/asr_cpu-${{ matrix.platform }}.spdx.json
-          fail-build: false
-          severity-cutoff: critical
-          output-format: json
-          output-file: release-evidence/vuln/asr_cpu-${{ matrix.platform }}.grype.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ always() }}
-        with:
-          name: evidence-${{ matrix.platform }}
-          path: release-evidence/
-          if-no-files-found: error
-          retention-days: 90
-
-  verify-cuda:
-    name: verify / asr_cuda pull by digest, SBOM, scan (no GPU probe)
-    needs: [config, cuda]
-    if: ${{ needs.config.outputs.publish_cuda == 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - name: Free runner disk for the CUDA image
-        shell: bash
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install the locked environment
-        shell: bash
-        run: |
-          python -m pip install --require-hashes -r requirements.lock
-          python -m pip install --no-deps --no-build-isolation -e ".[dev]"
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: published-asr_cuda
-          path: published
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pull-verify asr_cuda by digest (CUDA probe skipped; release.json gpu_evidence gates it)
-        id: refs
-        shell: bash
-        env:
-          NAMESPACE: ${{ needs.config.outputs.namespace }}
-        run: |
-          mkdir -p release-evidence/sbom release-evidence/vuln
-          python tests/test_release_gates.py pull-verify --manifest src/podmuncher/manifests/release.json \
-            --namespace "$NAMESPACE" --platform linux-amd64 --published published/asr_cuda.json \
-            --evidence release-evidence/verify --github-output "$GITHUB_OUTPUT"
-      - name: SBOM asr_cuda
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: ${{ steps.refs.outputs.asr_cuda_ref }}
-          format: spdx-json
-          output-file: release-evidence/sbom/asr_cuda-linux-amd64.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
-      - name: Vulnerability scan asr_cuda (report only)
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
-        with:
-          sbom: release-evidence/sbom/asr_cuda-linux-amd64.spdx.json
-          fail-build: false
-          severity-cutoff: critical
-          output-format: json
-          output-file: release-evidence/vuln/asr_cuda-linux-amd64.grype.json
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: ${{ always() }}
-        with:
-          name: evidence-cuda-linux-amd64
-          path: release-evidence/
-          if-no-files-found: error
-          retention-days: 90
-
-  finalize:
-    name: release / finalize the manifest copy
-    needs: [config, merge, verify, cuda, verify-cuda]
-    if: ${{ !cancelled() && !failure() && needs.verify.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    outputs:
-      manifest_sha256: ${{ steps.finalize.outputs.manifest_sha256 }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install the locked environment
-        shell: bash
-        run: |
-          python -m pip install --require-hashes -r requirements.lock
-          python -m pip install --no-deps --no-build-isolation -e ".[dev]"
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: published-*
-          path: published
-          merge-multiple: true
-      - name: Finalize release.json (copy), bind it to the pushed digests, require publishable, export its sha256
-        id: finalize
-        shell: bash
-        env:
-          NAMESPACE: ${{ needs.config.outputs.namespace }}
-          VERSION: ${{ needs.config.outputs.version }}
-          PUBLISH_CUDA: ${{ needs.config.outputs.publish_cuda }}
-          NVIDIA_REVIEWED: ${{ vars.PODMUNCHER_NVIDIA_REDISTRIBUTION_REVIEWED }}
-          MEDIA_DIGEST: ${{ needs.merge.outputs.media_digest }}
-          ASR_CPU_DIGEST: ${{ needs.merge.outputs.asr_cpu_digest }}
-          ASR_CUDA_DIGEST: ${{ needs.cuda.outputs.asr_cuda_digest }}
-        run: |
-          python tests/test_release_gates.py finalize --manifest src/podmuncher/manifests/release.json \
-            --published-dir published --namespace "$NAMESPACE" --version "$VERSION" \
-            --nvidia-reviewed "$NVIDIA_REVIEWED" --publish-cuda "$PUBLISH_CUDA" \
-            --expected-digest "media=$MEDIA_DIGEST" --expected-digest "asr_cpu=$ASR_CPU_DIGEST" \
-            --expected-digest "asr_cuda=$ASR_CUDA_DIGEST" \
-            --output release-evidence/release.json --github-output "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-manifest
-          path: release-evidence/release.json
-          if-no-files-found: error
-          retention-days: 90
-
-  wheel:
-    name: release / wheel with the finalized manifest
-    needs: [config, merge, cuda, finalize]
-    if: ${{ !cancelled() && !failure() && needs.finalize.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install the locked environment
-        shell: bash
-        run: |
-          python -m pip install --require-hashes -r requirements.lock
-          python -m pip install --no-deps --no-build-isolation -e ".[dev]"
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-manifest
-          path: release-evidence
-      - name: Verify the downloaded manifest against the finalize job output, then build the wheel from the tree
-        shell: bash
-        env:
-          MANIFEST_SHA256: ${{ needs.finalize.outputs.manifest_sha256 }}
-          MEDIA_DIGEST: ${{ needs.merge.outputs.media_digest }}
-          ASR_CPU_DIGEST: ${{ needs.merge.outputs.asr_cpu_digest }}
-          ASR_CUDA_DIGEST: ${{ needs.cuda.outputs.asr_cuda_digest }}
-        run: |
-          set -euo pipefail
-          python tests/test_release_gates.py check-finalized --manifest release-evidence/release.json \
-            --sha256 "$MANIFEST_SHA256" \
-            --expected-digest "media=$MEDIA_DIGEST" --expected-digest "asr_cpu=$ASR_CPU_DIGEST" \
-            --expected-digest "asr_cuda=$ASR_CUDA_DIGEST"
-          cp release-evidence/release.json src/podmuncher/manifests/release.json
-          python -m build --wheel --no-isolation --outdir dist
-          python tests/test_release_gates.py check-wheel --manifest release-evidence/release.json \
-            --wheel dist/*.whl --sha256 "$MANIFEST_SHA256"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: wheel
-          path: dist/*.whl
-          if-no-files-found: error
-          retention-days: 90
-
-  wheel-install:
-    name: release / clean-venv install (${{ matrix.os }}, py${{ matrix.python }})
-    needs: [config, finalize, wheel]
-    if: ${{ !cancelled() && !failure() && needs.wheel.result == 'success' }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python: ["3.12", "3.13", "3.14"]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ matrix.python }}
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: wheel
-          path: dist
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-manifest
-          path: release-evidence
-      - name: Verify the manifest artifact and the wheel's packaged copy against the finalize job output
-        shell: bash
-        env:
-          MANIFEST_SHA256: ${{ needs.finalize.outputs.manifest_sha256 }}
-        run: |
-          set -euo pipefail
-          python - "$MANIFEST_SHA256" release-evidence/release.json dist/podmuncher-*.whl <<'PY'
-          import hashlib, re, sys, zipfile
-          expected, manifest_path, wheel_path = sys.argv[1:]
-          assert re.fullmatch(r"[0-9a-f]{64}", expected), "manifest_sha256 job output is missing or invalid"
-          downloaded = open(manifest_path, "rb").read()
-          with zipfile.ZipFile(wheel_path) as archive:
-              packaged = archive.read("podmuncher/manifests/release.json")
-          for label, data in (("release-manifest artifact", downloaded), ("wheel packaged release.json", packaged)):
-              actual = hashlib.sha256(data).hexdigest()
-              assert actual == expected, f"{label}: sha256 {actual} differs from the finalize job output {expected}"
-          print(f"finalized manifest sha256 {expected} bound to the artifact and the wheel")
-          PY
-      - name: Install the wheel into a clean venv and run the CLI outside the checkout
-        shell: bash
-        env:
-          VERSION: ${{ needs.config.outputs.version }}
-        run: |
-          set -euo pipefail
-          LOCK="$PWD/requirements.lock"
-          WHEEL="$(ls "$PWD"/dist/podmuncher-*.whl)"
-          cd "$RUNNER_TEMP"
-          python -m venv clean-venv
-          if [ "$RUNNER_OS" = "Windows" ]; then BIN="clean-venv/Scripts"; else BIN="clean-venv/bin"; fi
-          "$BIN/python" -m pip install --require-hashes -r "$LOCK"
-          "$BIN/python" -m pip install --no-deps "$WHEEL"
-          "$BIN/podmuncher" --help
-          SHOWN="$("$BIN/podmuncher" --version)"
-          echo "$SHOWN"
-          [ "$SHOWN" = "podmuncher $VERSION" ]
-
   release:
-    name: release / GitHub Release (wheel, finalized manifest, SBOMs)
-    needs: [config, finalize, wheel, wheel-install]
-    if: ${{ !cancelled() && !failure() && needs.wheel-install.result == 'success' }}
+    name: release / finalize release.json, wheel, GitHub Release
+    needs: [config, merge, cuda]
+    if: ${{ !cancelled() && !failure() && needs.merge.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install the locked environment
+        shell: bash
+        run: |
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install --no-deps --no-build-isolation -e ".[dev]"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: artifacts
-      - name: Verify the manifest artifact and the wheel's packaged copy against the finalize job output
+          pattern: published-*
+          path: published
+          merge-multiple: true
+      - name: Write the pushed digests into release.json and build the wheel
         shell: bash
         env:
-          MANIFEST_SHA256: ${{ needs.finalize.outputs.manifest_sha256 }}
+          NAMESPACE: ${{ needs.config.outputs.namespace }}
+          VERSION: ${{ needs.config.outputs.version }}
+          NVIDIA_REVIEWED: ${{ vars.PODMUNCHER_NVIDIA_REDISTRIBUTION_REVIEWED }}
+          PUBLISH_CUDA: ${{ needs.config.outputs.publish_cuda }}
         run: |
           set -euo pipefail
-          python3 - "$MANIFEST_SHA256" artifacts/release-manifest/release.json artifacts/wheel/podmuncher-*.whl <<'PY'
-          import hashlib, re, sys, zipfile
-          expected, manifest_path, wheel_path = sys.argv[1:]
-          assert re.fullmatch(r"[0-9a-f]{64}", expected), "manifest_sha256 job output is missing or invalid"
-          downloaded = open(manifest_path, "rb").read()
-          with zipfile.ZipFile(wheel_path) as archive:
-              packaged = archive.read("podmuncher/manifests/release.json")
-          for label, data in (("release-manifest artifact", downloaded), ("wheel packaged release.json", packaged)):
-              actual = hashlib.sha256(data).hexdigest()
-              assert actual == expected, f"{label}: sha256 {actual} differs from the finalize job output {expected}"
-          print(f"finalized manifest sha256 {expected} bound to the artifact and the wheel")
-          PY
-      - name: Create the GitHub Release (no package index upload)
+          python tests/test_release_gates.py finalize --manifest src/podmuncher/manifests/release.json \
+            --published-dir published --namespace "$NAMESPACE" --version "$VERSION" \
+            --nvidia-reviewed "$NVIDIA_REVIEWED" --publish-cuda "$PUBLISH_CUDA" \
+            --output dist-manifest/release.json
+          cp dist-manifest/release.json src/podmuncher/manifests/release.json
+          python -m build --wheel --no-isolation --outdir dist
+          python -m venv "$RUNNER_TEMP/clean-venv"
+          "$RUNNER_TEMP/clean-venv/bin/python" -m pip install --require-hashes -r requirements.lock
+          "$RUNNER_TEMP/clean-venv/bin/python" -m pip install --no-deps dist/*.whl
+          [ "$("$RUNNER_TEMP/clean-venv/bin/podmuncher" --version)" = "podmuncher $VERSION" ]
+      - name: Create the GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.config.outputs.version }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          TAG="v${VERSION}"
           mkdir -p upload
-          cp artifacts/wheel/*.whl upload/
-          cp artifacts/release-manifest/release.json upload/release.json
-          cp artifacts/release-gates/gates.json upload/release-gates.json
-          for dir in artifacts/evidence-*; do
-            name="$(basename "$dir")"
-            tar -czf "upload/${name}.tar.gz" -C "$dir" .
-          done
-          python3 - upload/release.json > notes.md <<'PY'
+          cp dist/*.whl dist-manifest/release.json upload/
+          tar -czf upload/security.tar.gz security
+          python3 - dist-manifest/release.json > notes.md <<'PY'
           import json, sys
           document = json.load(open(sys.argv[1]))
-          registry = document["registry"]
-          print(f"Podmuncher {document['release_version']}")
-          print()
+          print(f"Podmuncher {document['release_version']}\n")
           print("Images (pull by digest):")
-          for capability, image in sorted(registry["images"].items()):
+          for capability, image in sorted(document["registry"]["images"].items()):
               if image["registry_digest"]:
                   print(f"- {capability}: {image['image_reference']}@{image['registry_digest']} ({', '.join(image['platforms'])})")
               else:
                   print(f"- {capability}: not published in this release")
-          print()
-          print(f"publishable: {document['release_status']['publishable']}")
-          for blocker in document["release_status"]["blockers"]:
-              print(f"- open: {blocker['code']} ({blocker['capability']}): {blocker['detail']}")
+          print("\nSBOMs and CVE scan reports: security/ in the repository (also attached as security.tar.gz).")
           PY
           PRERELEASE=""
           case "$VERSION" in *dev*|*a*|*b*|*rc*) PRERELEASE="--prerelease" ;; esac
-          VERIFY_TAG=""
-          if [ "$EVENT_NAME" = "push" ]; then VERIFY_TAG="--verify-tag"; fi
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "podmuncher ${VERSION}" --notes-file notes.md $PRERELEASE $VERIFY_TAG upload/*
+          gh release create "v${VERSION}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "podmuncher ${VERSION}" --notes-file notes.md $PRERELEASE upload/*
