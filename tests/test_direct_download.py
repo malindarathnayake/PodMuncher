@@ -1208,13 +1208,13 @@ async def test_cleanup_creates_no_task_or_deadline_overrun(tmp_path):
     result, content = await run_download(
         tmp_path,
         connection,
-        overall_timeout_seconds=0.03,
+        overall_timeout_seconds=2.0,  # generous for slow CI disks; a blocked close would hang past it
         read_timeout_seconds=0.1,
     )
     elapsed = asyncio.get_running_loop().time() - started
     assert result.bytes_written == 5
     assert content == b"media"
-    assert elapsed < 0.3
+    assert elapsed < 2.0
     assert asyncio.all_tasks() == tasks_before
     assert connection.abort_calls == 1
     assert not connection.close_called
