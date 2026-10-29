@@ -1302,7 +1302,7 @@ def test_dockerignore_limits_the_context_to_the_copied_files():
     copied = set()
     for line in lines:
         words = line.split()
-        if words and words[0].upper() == 'COPY' and '<<' not in line:
+        if words and words[0].upper() == 'COPY' and '<<' not in line and not words[1].startswith('--from='):
             copied.update(words[1:-1])
     assert len(copied) == 7 and all(item.startswith('src/podmuncher/') for item in copied)
     rules = [line.strip() for line in (root / '.dockerignore').read_text(encoding='utf-8').splitlines()

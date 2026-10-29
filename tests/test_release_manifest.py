@@ -816,7 +816,7 @@ def test_provenance_inventory_is_complete(release):
             names = {p["name"].lower().replace("_", "-") for p in image["python_packages"]}
             if cap == "media":
                 assert {"yt-dlp", "yt-dlp-ejs", "deno"} <= names
-                assert "ffmpeg" in {p["name"] for p in image["debian_packages"]}
+                assert "ffmpeg" not in {p["name"] for p in image["debian_packages"]}  # static build
             else:
                 assert {"faster-whisper", "ctranslate2", "av", "onnxruntime"} <= names
             if cap == "asr_cuda":
@@ -824,6 +824,7 @@ def test_provenance_inventory_is_complete(release):
         # Python package versions are identical across architectures (one hash-pinned list).
         versions = [{(p["name"], p["version"]) for p in image["python_packages"]} for image in images.values()]
         assert all(v == versions[0] for v in versions)
+    assert [(t["name"], t["image"]) for t in inventory["system_tools"]] == [("ffmpeg", "media")]
     nvidia = {p["name"] for p in inventory["nvidia_components"]}
     assert nvidia == {"nvidia-cublas-cu12", "nvidia-cudnn-cu12", "nvidia-cuda-nvrtc-cu12"}
     bases = {b["image"] for b in inventory["container_base_images"]}

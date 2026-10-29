@@ -63,7 +63,12 @@ CODECS = {
     "mp4_aac": ("m4a", ("-c:a", "aac", "-b:a", "64k")),
 }
 FIXTURE_GENERATOR = ("Synthetic speech from an original English text (bin/release_benchmarks.py) via ffmpeg flite "
-                     "(voice slt) inside the media image; no recordings")
+                     "(voice slt) inside a local Debian ffmpeg fixture image; no recordings")
+# The media image ships a static FFmpeg without flite, so fixtures come from this local, never-published image.
+FIXTURE_IMAGE = "podmuncher-bench-fixtures:local"
+FIXTURE_DOCKERFILE = (b"FROM debian@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4\n"
+                      b"RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg"
+                      b" && rm -rf /var/lib/apt/lists/*\n")
 GPU_METHOD = "docker run --gpus all on the CUDA release candidate (nvidia-smi and ctranslate2 inside the container)"
 CONDITIONAL_CODES = frozenset({"gpu_evidence_missing", "long_duration_unvalidated", "worker_defect_open"})
 RECORD_FIELDS = (
@@ -648,8 +653,16 @@ def _read_result(result, path: Path, sampler: _VramSampler | None) -> tuple[str,
     return "completed", values
 
 
+def build_fixture_image() -> str:
+    """Build the local fixture image (Debian ffmpeg with flite); it is never tagged for a registry."""
+    built = subprocess.run(("docker", "build", "-q", "-t", FIXTURE_IMAGE, "-"), input=FIXTURE_DOCKERFILE,
+                           capture_output=True, timeout=1800, check=False)
+    _require(built.returncode == 0, "fixture image build: " + built.stderr.decode("utf-8", "replace")[-400:])
+    return FIXTURE_IMAGE
+
+
 def generate_fixtures(media_image: str, out: Path) -> list[dict]:
-    """Render the original text with flite inside the media image, then encode every fixture."""
+    """Render the original text with flite inside the fixture image, then encode every fixture."""
     (out / "text.txt").write_text("\n".join([SPEECH_TEXT] * SPEECH_REPEATS), encoding="utf-8", newline="\n")
     base = ("run", "--rm", "--pull", "never", "--network", "none", "--read-only", "--user", "65532:65532",
             "--tmpfs", "/tmp", "--mount", f"type=bind,source={out},target=/out", "--entrypoint", "ffmpeg",
@@ -747,7 +760,7 @@ def cmd_run(args) -> int:
         snapshots = {model_id: cache.acquire(model) for model_id, model in models.items()}
         fixture_dir = work_root / "fixtures"
         fixture_dir.mkdir()
-        fixtures = generate_fixtures(ids["media"], fixture_dir)
+        fixtures = generate_fixtures(build_fixture_image(), fixture_dir)
         print(f"[run] fixtures {len(fixtures)} generated")
         by_point = {(f["codec"], f["seconds"]): fixture_dir / f["name"] for f in fixtures}
         gpu = gpu_evidence(ids["asr_cuda"])
