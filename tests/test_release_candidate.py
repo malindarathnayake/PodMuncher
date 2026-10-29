@@ -115,10 +115,10 @@ def test_apply_updates_identities_versions_and_rehashes(tmp_path):
         assert record["max_compressed_bytes"] == max(by_key[(p, cap)]["compressed_bytes"] for p in platforms)
         assert record["max_unpacked_bytes"] == max(by_key[(p, cap)]["unpacked_bytes"] for p in platforms)
 
-    assert after["release_version"] == "1.0.1"
+    assert after["release_version"] == "1.0.2"
     assert after["generated_at"].endswith("Z") and len(after["generated_at"]) == 20
     for platform, runtime in after["runtime_manifests"].items():
-        assert runtime["release_version"] == "1.0.1"
+        assert runtime["release_version"] == "1.0.2"
         for item in runtime["capabilities"]:
             record = after["local_build_identities"][item["id"]]
             assert item["digest"] == by_key[(platform, item["id"])]["local_image_id"]

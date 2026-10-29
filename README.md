@@ -47,7 +47,7 @@ python -m pip install podmuncher-<version>-py3-none-any.whl
 ```
 
 Container images are published to the GitHub Container Registry by the release workflow and
-pulled during setup. There is no PyPI package.
+pulled when first needed. There is no PyPI package.
 
 ### Install with a coding agent
 
@@ -71,19 +71,23 @@ On Linux and macOS use `.venv/bin/python`.
 
 ## Usage
 
-Run the guided setup once. It checks Docker, storage and hardware, shows its plan per volume
-before changing anything, pulls the images and downloads only the model it needs:
-
-```sh
-podmuncher --setup
-```
-
-Then transcribe:
+Transcribe something. Nothing needs setting up first: Podmuncher uses the NVIDIA GPU when there
+is one (otherwise the CPU), picks a model that fits, and downloads what it needs on the first
+run. Transcripts go to `~/Podmuncher`.
 
 ```sh
 podmuncher episode.mp3
-podmuncher https://example.com/episode.mp3 --output ./transcripts
-podmuncher "https://www.youtube.com/watch?v=VIDEO_ID" --video
+podmuncher "https://www.youtube.com/watch?v=VIDEO_ID"
+podmuncher https://example.com/episode.mp3 --output ./transcripts --video
+```
+
+It prints where the transcript is when it finishes. To download everything ahead of time, or to
+change the saved defaults, run setup. It asks no questions; flags adjust what it picks:
+
+```sh
+podmuncher --setup                          # best settings for this machine
+podmuncher --setup --output D:\Transcripts --device cpu --model small
+podmuncher --setup --guided                 # ask before each step
 ```
 
 Running `podmuncher` with no arguments in a terminal opens the dashboard. Other commands:

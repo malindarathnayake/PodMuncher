@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-29
+
+### Changed
+- No setup is needed: `podmuncher <file or link>` uses the NVIDIA GPU when there is one (otherwise the CPU), picks a model that fits and downloads what it needs on first use.
+- `podmuncher --setup` asks no questions. It applies the best settings for the machine; `--output`, `--device` and `--model` adjust them, and `--guided` brings back the step-by-step setup.
+- Transcripts go to `~/Podmuncher` by default.
+- A finished transcription prints where the transcript is, with plain progress steps instead of internal job fields; `--json` results include `output_dir` and `transcript`.
+
+### Fixed
+- GPU transcription works: the transcription step now runs on the selected GPU, and Docker Desktop's GPU passthrough (which hides the GPU's UUID from the container) is accepted.
+- Jobs no longer fail at random with `storage_unknown`, `storage_stale` or `envelope_unvalidated` on Docker Desktop: storage and hardware readings may be up to 10 s old instead of 3 s, and two checks reading the same folder at once no longer lose its write permission.
+
 ## [1.0.1] - 2026-10-29
 
 ### Added

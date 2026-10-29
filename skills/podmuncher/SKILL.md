@@ -54,10 +54,11 @@ needs the user, `next_action`.
 | 5 | Partly done (some outputs published). |
 | 130 | You interrupted the wait; the job keeps running in the service. |
 
-On success, find the files from the `job` object (its output folder / outputs). Each job gets
-its own folder with a readable `.txt`, a timestamped text, an `.srt`, a `.json` transcript and a
-manifest listing every file with its sha256. If the paths are not obvious in the JSON, run
-`podmuncher job <job_id> --json`, or list the newest folder in the output directory.
+On success the result has `transcript` (the plain-text transcript's path) and `output_dir`
+(the job's folder). The folder also holds `transcript.readable.txt` (paragraphs),
+`transcript.timestamped.txt`, `transcript.srt`, `transcript.json` and a manifest listing every
+file with its sha256. Transcripts go to `~/Podmuncher` unless `--output` or the saved settings
+say otherwise.
 
 When answering the user, give the transcript path, and quote or summarise from the `.txt` as
 they asked. Do not paste a whole long transcript unprompted.

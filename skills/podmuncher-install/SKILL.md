@@ -35,15 +35,13 @@ Stop and ask the user whenever a step says so.
 If Python is missing or older than 3.12, ask the user to install Python 3.12+ from python.org.
 If `docker info` fails, ask the user to install or start Docker Desktop, then re-check.
 
-## 2. Ask the user two questions
+## 2. Defaults (do not interrogate the user)
 
-1. **What to set up?**
-   - `transcripts on GPU` (recommended when `nvidia-smi` listed a GPU, Windows only),
-   - `transcripts on CPU` (any machine; slower),
-   - `video only` (download and keep media, no transcripts).
-2. **Where should transcripts go?** Default: Podmuncher's own output folder. Accept a
-   folder path if they give one. Do not use a network or cloud-synced folder (OneDrive,
-   iCloud, Dropbox); setup refuses shared folders.
+Podmuncher picks the best settings itself: the NVIDIA GPU when one is present (CPU as the
+fallback), otherwise the CPU, and a model that fits the hardware. Transcripts go to
+`~/Podmuncher`. Only ask if the user has already said they want something different, for
+example a specific transcript folder or CPU only. Never use a network or cloud-synced
+folder (OneDrive, iCloud, Dropbox) for output; Podmuncher refuses shared folders.
 
 ## 3. Install the package into its own virtual environment
 
@@ -72,10 +70,6 @@ PM=~/podmuncher-venv/bin/podmuncher
 `--version` must print `podmuncher <version>`. Use the full path (`$pm` / `$PM`) for every
 later command; do not rely on the venv being activated.
 
-If the user chose GPU, check the release includes the CUDA image: the release notes
-(`$release.body`, or the GitHub release page) must list `asr_cuda` with a digest. If they say
-`asr_cuda: not published in this release`, tell the user and fall back to CPU.
-
 ## 4. Run the read-only health check
 
 ```powershell
@@ -93,65 +87,35 @@ If a Podmuncher service from an earlier install is running (`podmuncher status -
 `"service_state": "running"`), run `podmuncher service stop` first so setup starts the new
 version.
 
-## 5. Run setup unattended with an answers file
+## 5. Download what transcription needs
 
-Write `podmuncher-answers.json` in a temporary folder:
-
-```json
-{
-  "capabilities": ["asr_cuda"],
-  "paths": {},
-  "accept_plan": true
-}
-```
-
-- `capabilities`: `["asr_cuda"]` for GPU, `["asr_cpu"]` for CPU, `["media"]` for video only.
-- `paths`: `{}` uses Podmuncher's default folders. For a custom transcript folder use
-  `{"output": "D:\\Transcripts"}` (allowed keys: `data`, `output`, `cache`, `scratch`,
-  `docker_backing`).
-- `accept_plan: true` lets setup download the images and the model it plans. Tell the user
-  before running this step: it downloads about 0.2 GB (video only), 0.5–2 GB (CPU) or
-  2–5 GB (GPU), depending on the model it picks, and starts the Podmuncher background service.
-- Optional `"model": "small"` pins a model; leave it out to let setup pick one for the hardware.
-
-Run setup with the answers file (it prints one result line, it does not prompt):
+Tell the user this downloads about 0.5–2 GB (CPU) or 2–5 GB (GPU), depending on the model,
+and starts the Podmuncher background service. Then run it; it asks no questions:
 
 ```powershell
-$env:PODMUNCHER_SETUP_ANSWERS = "C:\path\to\podmuncher-answers.json"
 & $pm --setup
-Remove-Item Env:PODMUNCHER_SETUP_ANSWERS
 ```
 
-```sh
-PODMUNCHER_SETUP_ANSWERS=/path/to/podmuncher-answers.json "$PM" --setup
-```
+Add `--output "D:\Transcripts"`, `--device cpu` or `--model small` only if the user asked
+for them. It prints what it picked, then `Ready. Transcripts go to <folder>`. Exit 0 means
+done. Exit 3 means blocked: relay the printed `setup: blocked (...) - <next action>` line to
+the user. Exit 4 means it failed: run it once more, then report the line and
+`doctor --json`.
 
-The output line is `setup: <state> (<reason_code>) - <next_action>`. Exit codes:
-
-| Exit | Meaning | What to do |
-|---|---|---|
-| 0 | Setup complete | Continue to step 6. |
-| 2 | Invalid answers | Fix the JSON (keys, `capabilities` values) and rerun. |
-| 3 | Blocked | Relay `next_action` to the user (free disk, start Docker, choose another option) and stop. |
-| 4 | Failed | Rerun once; if it fails again, report the line and run `doctor --json` for detail. |
-
-Setup can take several minutes on the first run while images and the model download.
+This step is optional: the first transcription downloads whatever is missing on its own.
+Running it now just makes the first transcription quicker. It can take several minutes.
 
 ## 6. Verify with a real transcription
 
-```powershell
-& $pm status --json
-```
-
-The service should be running. Then ask the user for a short media file or a YouTube link
-(a minute or two is enough) and transcribe it:
+Ask the user for a short media file or a YouTube link (a minute or two is enough) and
+transcribe it:
 
 ```powershell
 & $pm "C:\path\to\clip.mp3" --json
 ```
 
-The JSON result lists the output folder and files (`.txt`, `.srt`, `.json`). Show the user
-where the transcript is and the first few lines of the `.txt`.
+The JSON result has `ok`, `output_dir` and `transcript` (the path of the plain-text
+transcript). Show the user where the transcript is and its first few lines.
 
 ## 7. Tell the user how to use it
 
@@ -159,7 +123,8 @@ where the transcript is and the first few lines of the `.txt`.
 - Dashboard: run `podmuncher` with no arguments in a terminal.
 - Status and jobs: `podmuncher status`, `podmuncher jobs`.
 - Service: `podmuncher service start|stop`; `podmuncher status` shows whether it is running.
-- Re-run setup interactively at any time: `podmuncher --setup`.
+- Change settings: `podmuncher --setup --output DIR` (or `--device`, `--model`).
+  `podmuncher --setup --guided` asks before each step.
 
 The command lives at `~/podmuncher-venv/Scripts/podmuncher.exe` (Windows) or
 `~/podmuncher-venv/bin/podmuncher` (macOS). Offer to add that folder to the user's PATH;
