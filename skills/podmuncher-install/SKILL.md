@@ -82,10 +82,16 @@ If the user chose GPU, check the release includes the CUDA image: the release no
 & $pm doctor --json
 ```
 
-`doctor` changes nothing. Every entry under `checks` should have `"status": "ok"`. For any
-check that is not ok, report its `name`, `reason_code` and the `next_action` to the user and
-stop until it is fixed. The common one is `docker` (`docker_unavailable`): Docker Desktop is
-not running.
+`doctor` changes nothing. It should return `"ok": true` and `"exit_code": 0`, and the
+`paths`, `host_capacity`, `docker`, `backing` and `cache` entries under `checks` should have
+`"status": "ok"`. Before setup, `service` is `stopped` and `snapshot` is `stale`; that is
+normal. For any other check that is not ok, report its `name`, `reason_code` and the top-level
+`next_action` to the user and stop until it is fixed. The common one is `docker`
+(`docker_unavailable`): Docker Desktop is not running.
+
+If a Podmuncher service from an earlier install is running (`podmuncher status --json` shows
+`"service_state": "running"`), run `podmuncher service stop` first so setup starts the new
+version.
 
 ## 5. Run setup unattended with an answers file
 
@@ -152,7 +158,7 @@ where the transcript is and the first few lines of the `.txt`.
 - Transcribe: `podmuncher <file-or-url>`; add `--video` to keep the original video.
 - Dashboard: run `podmuncher` with no arguments in a terminal.
 - Status and jobs: `podmuncher status`, `podmuncher jobs`.
-- Service: `podmuncher service start|stop|status`.
+- Service: `podmuncher service start|stop`; `podmuncher status` shows whether it is running.
 - Re-run setup interactively at any time: `podmuncher --setup`.
 
 The command lives at `~/podmuncher-venv/Scripts/podmuncher.exe` (Windows) or
