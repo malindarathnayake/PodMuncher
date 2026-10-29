@@ -186,12 +186,15 @@ class PlainPresentation:
 
     def render(self, result: dict, *, command: str) -> str:
         if command == "progress":
-            return self.escape(f"{result.get('job_id', '-')} {result.get('state', '-')}")
+            state = str(result.get("state", "-"))
+            return self.escape(f"  {_STAGE_LABELS.get(state, state)}...")
         job_id = result.get("job_id")
         if result.get("detached"):
             if result.get("exit_code") == EXIT_INTERRUPTED:
                 return self.escape(f"Detached; job {job_id} keeps running")
             return self.escape(str(job_id))
+        if command in _JOB_COMMANDS and isinstance(result.get("job"), dict):
+            return self._job_summary(result)
         status = "ok" if result.get("ok") else "failed"
         lines = [f"{self.escape(command)}: {status} ({self.escape(str(result.get('reason_code')))})"]
         body = {k: v for k, v in result.items()
@@ -199,7 +202,38 @@ class PlainPresentation:
         self._value(body, 1, lines)
         return "\n".join(lines)
 
+    def _path(self, text: str) -> str:
+        """A local path: control characters escaped, Windows backslashes kept single."""
+        return self.escape(text).replace("\\\\", "\\")
 
+    def _job_summary(self, result: dict) -> str:
+        """A finished job in a few readable lines; ``--json`` keeps every field."""
+        job = result["job"]
+        state = str(job.get("state", "-"))
+        lines = [f"Title:      {self.escape(str(job['title']))}"] if job.get("title") else []
+        if state in ("completed", "partial"):
+            lines.append("Done." if state == "completed" else "Partly done: some outputs were published.")
+            if result.get("transcript"):
+                lines.append(f"Transcript: {self._path(result['transcript'])}")
+            if result.get("output_dir"):
+                lines.append(f"Folder:     {self._path(result['output_dir'])}")
+        else:
+            lines.append(f"{state.capitalize()} ({self.escape(str(result.get('reason_code')))})")
+            if result.get("next_action"):
+                lines.append(f"Next:       {self.escape(str(result['next_action']))}")
+            elif state == "failed" and result.get("job_id"):
+                lines.append(f"Next:       podmuncher retry {self.escape(str(result['job_id']))}")
+        lines.append(f"Job:        {self.escape(str(result.get('job_id')))}")
+        return "\n".join(lines)
+
+
+_JOB_COMMANDS = frozenset({"submit", "retry", "clone", "job"})
+_STAGE_LABELS = {
+    "queued": "Queued", "checking": "Checking the input", "preparing": "Preparing",
+    "downloading": "Downloading", "probing": "Reading the media", "transcribing": "Transcribing",
+    "exporting": "Writing the transcript", "completed": "Finished", "partial": "Finished with gaps",
+    "failed": "Failed", "blocked": "Blocked", "cancelled": "Cancelled", "interrupted": "Interrupted",
+}
 _DEFAULT_ADAPTER = PlainPresentation()
 _adapter: PresentationAdapter | None = None
 _client_startup: Callable[[], Any] | None = None
@@ -396,7 +430,10 @@ def _build_input_parser() -> argparse.ArgumentParser:
                "prefix an input named like a command with './'.")
     parser.add_argument("--version", action="version",
                         version=f"%(prog)s {_package_version()}")
-    parser.add_argument("--setup", action="store_true", help="run the guided setup")
+    parser.add_argument("--setup", action="store_true",
+                        help="download what transcription needs, using the best settings for this "
+                             "machine (--device, --output and --model adjust them)")
+    parser.add_argument("--guided", action="store_true", help="with --setup: ask before each step")
     parser.add_argument("input", nargs="?", metavar="INPUT",
                         help="local media path or public https URL")
     return parser
@@ -484,10 +521,13 @@ class _Context:
         self.environ = environ
         self.adapter = adapter
         self.no_color = no_color
+        self._shown: set[str] = set()
 
     def progress(self, job: Mapping[str, Any]) -> None:
-        if self.as_json:
-            return
+        state = str(job.get("state"))
+        if self.as_json or exit_for_job_state(state) is not None or state in self._shown:
+            return  # terminal states are in the final summary; each stage shows once
+        self._shown.add(state)
         _write(self.adapter.render({"job_id": job.get("job_id"), "state": job.get("state")},
                                    command="progress"))
 
@@ -573,6 +613,9 @@ def build_request(args: argparse.Namespace, environ: Mapping[str, str]) -> dict:
     models, languages = _registries()
     registry = {"verified_models": models, "verified_languages": languages}
     raw = _read_preferences(environ)
+    if raw is None and "paths" not in overrides:
+        # Never set up: transcripts go where ``podmuncher --setup`` would put them.
+        overrides["paths"] = {"output": os.path.join(os.path.expanduser("~"), "Podmuncher")}
     config = Config.from_toml(raw, overrides=overrides, **registry) if raw is not None \
         else Config.from_dict(None, overrides=overrides, **registry)
     data = {
@@ -761,7 +804,27 @@ def _submit_like(ctx: _Context, command: str, args: argparse.Namespace,
 
 def _cmd_submit(ctx: _Context, args: argparse.Namespace) -> dict:
     request = build_request(args, ctx.environ)
-    return _submit_like(ctx, "submit", args, lambda client, key: client.submit(request, key))
+    if not ctx.as_json and not args.detach:
+        text = str(args.input)
+        name = text if "://" in text else (os.path.basename(text.rstrip("/\\")) or text)
+        _write(f"Transcribing {_DEFAULT_ADAPTER.escape(name)}")
+    result = _submit_like(ctx, "submit", args, lambda client, key: client.submit(request, key))
+    _add_output_paths(result, request.get("output_root"))
+    return result
+
+
+def _add_output_paths(result: dict, output_root: object) -> None:
+    """Where a finished job's files are: ``output_dir`` and the plain ``transcript`` file."""
+    job = result.get("job")
+    if not isinstance(job, Mapping) or type(output_root) is not str or not output_root:
+        return
+    if job.get("state") not in ("completed", "partial") or not job.get("job_id"):
+        return
+    folder = os.path.join(output_root, f"podmuncher-{job['job_id']}")
+    result["output_dir"] = folder
+    slots = {a.get("slot") for a in job.get("artifacts") or () if isinstance(a, Mapping) and a.get("available")}
+    if "transcript_txt" in slots:
+        result["transcript"] = os.path.join(folder, "transcript.txt")
 
 
 def _cmd_retry(ctx: _Context, args: argparse.Namespace) -> dict:
@@ -837,16 +900,21 @@ def _cmd_tui(ctx: _Context, args: argparse.Namespace) -> dict:
 
 
 def _cmd_setup(ctx: _Context, args: argparse.Namespace) -> dict:
-    """Guided setup applied by the service, which is started or attached only once the
-    setup is going to run: it holds the setup lease, the Docker session and the probe
-    port, so provisioning (pulls, the in-worker probe, model acquisition, the smoke) runs
-    there.  Prompts and the answers file (``PODMUNCHER_SETUP_ANSWERS``) stay here."""
+    """Setup applied by the service, which is started or attached only once the setup is
+    going to run: it holds the setup lease, the Docker session and the probe port, so
+    provisioning (pulls, the in-worker probe, model acquisition, the smoke) runs there.
+    By default it picks the best settings without asking (``--device``, ``--output`` and
+    ``--model`` adjust them); ``--guided`` asks instead.  The answers file
+    (``PODMUNCHER_SETUP_ANSWERS``) still wins when set."""
     from . import setup
 
     def applier() -> Any:
         return setup.ServiceSetup(ctx.access.ensure(), sleep=ctx.sleep)
 
-    code = setup.main(environ=ctx.environ, applier=applier)
+    auto = None if getattr(args, "guided", False) else setup.auto_answers(
+        device=getattr(args, "device", None), output=getattr(args, "output", None),
+        model=getattr(args, "model", None))
+    code = setup.main(environ=ctx.environ, applier=applier, auto=auto)
     result = _result("setup", code if isinstance(code, int) else EXIT_OK)
     result["_silent"] = True
     return result

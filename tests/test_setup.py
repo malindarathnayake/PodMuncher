@@ -1541,3 +1541,18 @@ def test_own_transport_smoke(tmp_path):
     for name, check in report["checks"].items():
         print(f"doctor {name}: {check['status']} {check['reason_code']}")
     print("PODMUNCHER_SMOKE_OK")
+
+
+def test_auto_answers_pick_the_best_settings_and_take_overrides():
+    gpu = su.auto_answers(gpu=True)
+    assert gpu == {"capabilities": ["asr_cuda", "asr_cpu"], "paths": {"output": su.default_output_dir()},
+                   "accept_plan": True}
+    assert su.default_output_dir() == str(Path.home() / "Podmuncher")
+    assert su.auto_answers(gpu=False)["capabilities"] == ["asr_cpu"]
+    assert su.auto_answers(gpu=True, device="cpu")["capabilities"] == ["asr_cpu"]
+    assert su.auto_answers(gpu=False, device="cuda")["capabilities"] == ["asr_cuda", "asr_cpu"]
+    tweaked = su.auto_answers(gpu=False, output="D:/Transcripts", model="small")
+    assert tweaked["paths"] == {"output": "D:/Transcripts"} and tweaked["model"] == "small"
+    assert "model" not in su.auto_answers(gpu=False, model="auto")
+    for answers in (gpu, tweaked):
+        su.parse_capabilities(answers["capabilities"])  # always valid for the setup machine

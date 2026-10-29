@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tomllib
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -1126,6 +1127,41 @@ def _run_noninteractive_remote(answers: Mapping[str, Any], applier: SetupApplier
     return result.exit_code
 
 
+def _nvidia_gpu_present() -> bool:
+    """True when ``nvidia-smi`` lists a GPU on this host (never raises)."""
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    try:
+        result = subprocess.run(("nvidia-smi", "--query-gpu=uuid", "--format=csv,noheader"),
+                                capture_output=True, timeout=15, check=False,
+                                stdin=subprocess.DEVNULL, **flags)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and result.stdout.strip().startswith(b"GPU-")
+
+
+def default_output_dir() -> str:
+    """Where transcripts go unless the user picks a folder: ``Podmuncher`` in their home folder."""
+    return str(Path.home() / "Podmuncher")
+
+
+def auto_answers(*, device: str | None = None, output: str | None = None, model: str | None = None,
+                 gpu: bool | None = None) -> dict:
+    """The best settings for this machine, with optional overrides from the command line.
+
+    With an NVIDIA GPU, transcription runs on the GPU and the CPU image is kept as the
+    fallback; without one (or with ``device="cpu"``), on the CPU.  Transcripts go to
+    ``output`` or :func:`default_output_dir`; the other paths keep their defaults.  The model
+    is chosen automatically unless named.
+    """
+    gpu = _nvidia_gpu_present() if gpu is None else gpu
+    use_gpu = device == "cuda" or (device in (None, "auto") and gpu)
+    answers: dict[str, Any] = {"capabilities": ["asr_cuda", "asr_cpu"] if use_gpu else ["asr_cpu"],
+                               "paths": {"output": output or default_output_dir()}, "accept_plan": True}
+    if model and model != "auto":
+        answers["model"] = model
+    return answers
+
+
 def run_noninteractive(answers_path: str, actions: SetupActions | None = None, *,
                        out: Callable[[str], None] = print,
                        applier: Callable[[], SetupApplier] | None = None) -> int:
@@ -1136,6 +1172,13 @@ def run_noninteractive(answers_path: str, actions: SetupActions | None = None, *
     except DomainValidationError as error:
         out(f"setup: invalid answers file ({error.reason_code})")
         return EXIT_INVALID
+    return run_answers(answers, actions, out=out, applier=applier)
+
+
+def run_answers(answers: Mapping[str, Any], actions: SetupActions | None = None, *,
+                out: Callable[[str], None] = print,
+                applier: Callable[[], SetupApplier] | None = None) -> int:
+    """Apply validated answers (from a file or :func:`auto_answers`)."""
     if applier is not None:
         return _run_noninteractive_remote(answers, applier(), out=out)
     actions = actions if actions is not None else LocalSetupActions()
@@ -1380,16 +1423,32 @@ def _is_tty() -> bool:
 
 def main(argv: list[str] | None = None, *, actions: SetupActions | None = None,
          environ: Mapping[str, str] | None = None, interactive: bool | None = None,
-         applier: Callable[[], SetupApplier] | None = None) -> int:
+         applier: Callable[[], SetupApplier] | None = None,
+         auto: Mapping[str, Any] | None = None) -> int:
     """cli entry. Never blocks on hidden input.
 
     ``applier`` is the CLI's service binding (a factory for :class:`ServiceSetup`): the
     service is started or attached only once setup is going to run, never for a refusal.
+    ``auto`` (from :func:`auto_answers`) applies the best settings without any question.
     """
     env = os.environ if environ is None else environ
     answers = env.get(ANSWERS_ENV, "")
     if answers:
         return run_noninteractive(answers, actions, applier=applier)
+    if auto is not None:
+        where = "the NVIDIA GPU (CPU as fallback)" if "asr_cuda" in auto["capabilities"] else "the CPU"
+        print(f"Setting up Podmuncher: transcription on {where}. Downloading what it needs; "
+              "this can take a few minutes the first time.")
+        lines: list[str] = []
+        code = run_answers(auto, actions, out=lines.append, applier=applier)
+        if code == EXIT_OK:
+            # Each job carries the saved output folder and device, so no restart is needed.
+            print(f"Ready. Transcripts go to {auto['paths']['output']}")
+            print("Transcribe with: podmuncher <file or link>")
+        else:
+            for line in lines:
+                print(line)
+        return code
     if (_is_tty() if interactive is None else interactive):
         return run_interactive(actions, applier=applier)
     print(f"setup: no terminal and no answers; set {ANSWERS_ENV} to a JSON answers file", file=sys.stderr)
@@ -1400,5 +1459,5 @@ __all__ = (
     "ANSWERS_ENV", "LocalConfigWriter", "LocalSetupActions", "ProvisioningPort", "ServiceSetup",
     "SetupActions", "SetupApplier", "SetupError", "SetupMachine", "SetupResult", "SetupService",
     "SetupState", "StepResult", "UnboundProvisioning", "apply_remote", "doctor_report", "drive",
-    "load_answers", "main", "parse_capabilities", "shared_folder_warnings",
+    "auto_answers", "load_answers", "main", "parse_capabilities", "run_answers", "shared_folder_warnings",
 )

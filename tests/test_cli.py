@@ -338,7 +338,17 @@ def test_progress_lines_go_through_the_adapter(capsys, env, tmp_path):
     code, out, _ = invoke(["in.mp3", "--output", str(tmp_path)], FakeAccess(client), capsys, env)
     assert code == 0
     lines = out.splitlines()
-    assert lines[:3] == [f"{JOB} queued", f"{JOB} transcribing", f"{JOB} completed"]
+    assert lines[:4] == ["Transcribing in.mp3", "  Queued...", "  Transcribing...", "Done."]
+    assert lines[-1] == f"Job:        {JOB}"
+
+
+def test_finished_job_reports_where_its_files_are(capsys, env, tmp_path):
+    client = FakeServiceClient(["queued", "completed"])
+    code, out, _ = invoke(["in.mp3", "--output", str(tmp_path), "--json"], FakeAccess(client), capsys, env)
+    assert code == 0
+    result = json.loads(out)
+    assert result["output_dir"] == os.path.join(str(tmp_path), f"podmuncher-{JOB}")
+    assert "Transcribing" not in out  # --json prints only the result
 
 
 # -- exits ---------------------------------------------------------------------------
@@ -936,7 +946,7 @@ def test_setup_service_refusal_maps_through_the_reason_table(capsys, env, tmp_pa
 def test_setup_without_answers_or_a_tty_never_starts_the_service(capsys, env, monkeypatch):
     monkeypatch.setattr("podmuncher.setup._is_tty", lambda: False)
     access = FakeAccess()
-    code, out, err = invoke(["--setup"], access, capsys, env)
+    code, out, err = invoke(["--setup", "--guided"], access, capsys, env)
     assert code == 2 and "PODMUNCHER_SETUP_ANSWERS" in err and access.touched == []
     # An invalid answers file is refused before the service is touched.
     code, out, _ = invoke(["--setup"], access, capsys, {**env, "PODMUNCHER_SETUP_ANSWERS": "nope.json"})
