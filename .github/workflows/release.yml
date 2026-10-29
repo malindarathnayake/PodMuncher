@@ -363,5 +363,12 @@ jobs:
           PY
           PRERELEASE=""
           case "$VERSION" in *dev*|*a*|*b*|*rc*) PRERELEASE="--prerelease" ;; esac
-          gh release create "v${VERSION}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "podmuncher ${VERSION}" --notes-file notes.md $PRERELEASE upload/*
+          # A release created by hand (e.g. to push the tag) is updated in place.
+          if gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "v${VERSION}" --repo "$GITHUB_REPOSITORY" --clobber upload/*
+            gh release edit "v${VERSION}" --repo "$GITHUB_REPOSITORY" \
+              --title "podmuncher ${VERSION}" --notes-file notes.md $PRERELEASE
+          else
+            gh release create "v${VERSION}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "podmuncher ${VERSION}" --notes-file notes.md $PRERELEASE upload/*
+          fi
