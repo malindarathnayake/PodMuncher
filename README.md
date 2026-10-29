@@ -49,6 +49,16 @@ python -m pip install podmuncher-<version>-py3-none-any.whl
 Container images are published to the GitHub Container Registry by the release workflow and
 pulled during setup. There is no PyPI package.
 
+### Install with a coding agent
+
+Give Claude Code, Codex or another coding agent the install skill and ask it to set Podmuncher up:
+
+> Follow https://github.com/malindarathnayake/PodMuncher/releases/latest/download/podmuncher-install-SKILL.md to install Podmuncher.
+
+It checks the prerequisites, installs the latest release, runs setup and a test transcription,
+and installs the [usage skill](skills/podmuncher/SKILL.md) so the agent can transcribe for you
+later ("transcribe this episode").
+
 To work from source:
 
 ```sh
