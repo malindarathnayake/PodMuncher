@@ -351,6 +351,24 @@ def test_finished_job_reports_where_its_files_are(capsys, env, tmp_path):
     assert "Transcribing" not in out  # --json prints only the result
 
 
+def test_stopped_job_says_what_happened_and_the_next_command():
+    plain = cli.PlainPresentation()
+    blocked = plain._job_summary({"job": {"state": "blocked"}, "job_id": JOB,
+                                  "reason_code": "storage_insufficient", "next_action": "recheck"})
+    assert blocked.splitlines()[:2] == [
+        "Blocked: not enough free disk space (Podmuncher keeps up to 10 GB free on each drive it uses)"
+        " (storage_insufficient)",
+        f"Next:       free up disk space, then run: podmuncher recheck {JOB}",
+    ]
+    failed = plain._job_summary({"job": {"state": "failed"}, "job_id": JOB, "reason_code": "no_audio"})
+    assert failed.splitlines()[:2] == ["Failed: the media has no audio (no_audio)",
+                                       f"Next:       podmuncher retry {JOB}"]
+    unknown = plain._job_summary({"job": {"state": "failed"}, "job_id": JOB, "reason_code": "surprise",
+                                  "next_action": "retry_later"})
+    assert unknown.splitlines()[:2] == ["Failed (surprise)", f"Next:       podmuncher retry {JOB}"]
+    assert set(cli._REASON_HINTS) <= {c.value for c in ReasonCode}
+
+
 # -- exits ---------------------------------------------------------------------------
 
 

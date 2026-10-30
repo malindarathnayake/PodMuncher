@@ -218,16 +218,60 @@ class PlainPresentation:
             if result.get("output_dir"):
                 lines.append(f"Folder:     {self._path(result['output_dir'])}")
         else:
-            lines.append(f"{state.capitalize()} ({self.escape(str(result.get('reason_code')))})")
-            if result.get("next_action"):
-                lines.append(f"Next:       {self.escape(str(result['next_action']))}")
-            elif state == "failed" and result.get("job_id"):
-                lines.append(f"Next:       podmuncher retry {self.escape(str(result['job_id']))}")
+            reason = str(result.get("reason_code"))
+            what, fix = _REASON_HINTS.get(reason, (None, None))
+            headline = f"{state.capitalize()}: {what}" if what else state.capitalize()
+            lines.append(f"{headline} ({self.escape(reason)})")
+            command = self._next_command(state, result)
+            if fix and command:
+                lines.append(f"Next:       {fix}, then run: {command}")
+            elif fix or command:
+                lines.append(f"Next:       {fix or command}")
         lines.append(f"Job:        {self.escape(str(result.get('job_id')))}")
         return "\n".join(lines)
 
+    def _next_command(self, state: str, result: dict) -> str | None:
+        """The command that continues a stopped job (``next_action`` tokens become commands)."""
+        job_id = self.escape(str(result.get("job_id"))) if result.get("job_id") else None
+        action = str(result.get("next_action") or "")
+        if job_id and action == "recheck":
+            return f"podmuncher recheck {job_id}"
+        if job_id and (action in ("retry", "retry_later") or (not action and state == "failed")):
+            return f"podmuncher retry {job_id}"
+        return self.escape(action) if action else None
+
 
 _JOB_COMMANDS = frozenset({"submit", "retry", "clone", "job"})
+# What a stopped job's reason means, and what to do before continuing it (or None).
+_REASON_HINTS: dict[str, tuple[str, str | None]] = {
+    "storage_insufficient": ("not enough free disk space (Podmuncher keeps up to 10 GB free on each "
+                             "drive it uses)", "free up disk space"),
+    "quota_exceeded": ("the disk quota is used up", "free up disk space"),
+    "storage_unknown": ("free disk space could not be measured", "make sure Docker Desktop is running"),
+    "storage_stale": ("free disk space could not be measured in time", "make sure Docker Desktop is running"),
+    "docker_unavailable": ("Docker is not running or did not answer", "start Docker Desktop"),
+    "docker_context_unsupported": ("the current Docker context is not supported",
+                                   "switch to the default Docker Desktop context"),
+    "service_unavailable": ("a Podmuncher component was not ready", "run: podmuncher service stop"),
+    "gpu_unavailable": ("the GPU is unavailable or short of free memory",
+                        "close GPU-heavy apps or add --device cpu"),
+    "ram_insufficient": ("not enough free memory for the model", "close other apps or add --model small"),
+    "model_oom": ("the model ran out of memory", "add --model small"),
+    "model_load_failed": ("the model could not be loaded", "remove it with: podmuncher cache remove"),
+    "upstream_unavailable": ("the source or the image registry could not be reached", "check your connection"),
+    "download_timeout": ("the download took too long", "check your connection"),
+    "content_denied": ("the site refused the download (private, age-restricted or region-locked)", None),
+    "input_rejected": ("only local files, https links and single YouTube videos are supported", None),
+    "media_probe_failed": ("the file could not be read as audio or video", None),
+    "media_limit_reached": ("the media is larger than the size limit", None),
+    "no_audio": ("the media has no audio", None),
+    "no_video": ("the media has no video, but a video was asked for", "leave out --video"),
+    "duration_unknown": ("the media's length could not be read", None),
+    "duration_exceeded": ("the media is longer than the length limit", None),
+    "asset_verification_failed": ("a downloaded image or model did not match its checksum", None),
+    "queue_full": ("too many jobs are waiting", "wait for some to finish"),
+    "cancelled": ("the job was cancelled", None),
+}
 _STAGE_LABELS = {
     "queued": "Queued", "checking": "Checking the input", "preparing": "Preparing",
     "downloading": "Downloading", "probing": "Reading the media", "transcribing": "Transcribing",

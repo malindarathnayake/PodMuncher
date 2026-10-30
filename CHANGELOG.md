@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-30
+
+### Fixed
+- The first automatic-model job after an upgrade no longer fails with `service_unavailable`: the transcription image of the new release is pulled when it is missing, instead of only during setup.
+- CPU transcription uses every CPU Docker has instead of one.
+
+### Changed
+- A blocked or failed job says what went wrong in plain words and gives the command to continue, for example `Blocked: not enough free disk space … Next: free up disk space, then run: podmuncher recheck <job>`.
+
 ## [1.0.2] - 2026-10-29
 
 ### Changed

@@ -1,7 +1,7 @@
 {
  "document": "podmuncher-release-manifest",
  "document_version": 2,
- "release_version": "1.0.2",
+ "release_version": "1.0.3",
  "generated_at": "2026-10-28T23:50:53Z",
  "release_status": {
   "publishable": false,
@@ -232,7 +232,7 @@
  "runtime_manifests": {
   "linux-amd64": {
    "schema_version": 1,
-   "release_version": "1.0.2",
+   "release_version": "1.0.3",
    "source": {
     "kind": "development_fixture",
     "label": "fixture",
@@ -868,7 +868,7 @@
   },
   "linux-arm64": {
    "schema_version": 1,
-   "release_version": "1.0.2",
+   "release_version": "1.0.3",
    "source": {
     "kind": "development_fixture",
     "label": "fixture",
@@ -1445,8 +1445,8 @@
   }
  },
  "runtime_manifest_sha256": {
-  "linux-amd64": "93399ff7721ee99059ddbe9b58bf55891c65d5727a41a65e2fd8060360fba99f",
-  "linux-arm64": "16135cbb7a5de596c8eda3fd577934920fce79196689aa4db648218397fd4c08"
+  "linux-amd64": "a92fb396fb0df213d6a023871c4f567251a89b975703ce3eaf718c76ed13e3df",
+  "linux-arm64": "e930dd67d77fce747134ff0df728cf4695af6bb5392e0c281fe83eb2a5c4b37d"
  },
  "model_selection": {
   "hardware_table": "src/podmuncher/assets/model_hardware.json",

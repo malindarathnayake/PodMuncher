@@ -128,7 +128,7 @@ def assert_wheel_policy(report: dict) -> None:
     metadata = report["metadata"]
     assert metadata["License-Expression"] == ["Apache-2.0"]
     assert metadata["Requires-Python"] == ["<3.15,>=3.12"]
-    assert metadata["Version"] == ["1.0.2"]
+    assert metadata["Version"] == ["1.0.3"]
     assert "[console_scripts]" in report["entry_points"]
     assert "podmuncher = podmuncher:main" in report["entry_points"]
 
@@ -260,7 +260,7 @@ def test_forbidden_member_policy_examples():
                 "podmuncher/__pycache__/cli.cpython-312.pyc"):
         assert forbidden_member(bad), bad
     for good in (*WHEEL_ASSETS, "podmuncher/model_cache.py", "podmuncher/manifests/release.json",
-                 "podmuncher-1.0.2.dist-info/METADATA"):
+                 "podmuncher-1.0.3.dist-info/METADATA"):
         assert not forbidden_member(good), good
 
 
@@ -399,7 +399,7 @@ def test_clean_install_smoke_outside_checkout():
              f"heavy = sorted(n for n in sys.modules if n.split('.')[0] in {HEAVY_MODULES!r})\n"
              "assert not heavy, heavy")],
             cwd=cwd, env=env, timeout=60, what="lightweight import check")
-        assert light.stdout.strip() == "podmuncher 1.0.2"
+        assert light.stdout.strip() == "podmuncher 1.0.3"
 
         state = work / "state"
         status_env = make_clean_env(home, PODMUNCHER_STATE_DIR=str(state))

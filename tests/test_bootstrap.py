@@ -2250,9 +2250,11 @@ class ReleaseLaunch(FakeProbeLaunch):
 
     async def pull_image(self, image: str, *, growth: Any, timeout: float,
                          manual_backing: str | None = None) -> dict:
-        self.pulls.append((image, growth, timeout))
-        self.pull_backings.append(manual_backing)
-        return await self.real.pull_image(image, growth=growth, timeout=timeout, manual_backing=manual_backing)
+        result = await self.real.pull_image(image, growth=growth, timeout=timeout, manual_backing=manual_backing)
+        if result.get("pulled", True):  # a present image returns before any pull
+            self.pulls.append((image, growth, timeout))
+            self.pull_backings.append(manual_backing)
+        return result
 
 
 class ReleaseLauncher(FakeLauncher):
@@ -2396,6 +2398,16 @@ def test_release_path_setup_pulls_probes_and_a_job_prepares(tmp_path: Path, monk
             assert final.state is JobState.COMPLETED, (final.state, final.reason_code)
             since = cli.calls[before:]
             assert ("image", "inspect", media_ref) in since and all(call[0] != "pull" for call in since)
+
+            # A new release (or a prune) leaves the transcription image absent: a job's model
+            # probe pulls it first instead of failing with service_unavailable.
+            cli.listed.discard(asr_ref)
+            pulled = len(launch.pulls)
+            evidence = await composition.probe.collect(Capability.ASR_CPU)
+            assert evidence.workers and asr_ref in cli.listed
+            assert [p[0] for p in launch.pulls[pulled:]] == [asr_ref]
+            await composition.probe.collect(Capability.ASR_CPU)  # present now: no second pull
+            assert len(launch.pulls) == pulled + 1
         finally:
             await composition.shutdown()
 
@@ -3933,3 +3945,25 @@ def test_probe_evidence_live(tmp_path: Path) -> None:
           f"ram_available={worker.hardware.worker_ram_available.value} "
           f"age_at_use={timings['age_at_use']:.2f}s used_at={timings['used_at']:.2f}s "
           f"returned_at={timings['returned_at']:.2f}s")
+
+
+def test_cpu_transcription_gets_every_engine_cpu() -> None:
+    from podmuncher.runtime import WorkerPolicy
+
+    class InfoCli:
+        def __init__(self, stdout: str, returncode: int = 0) -> None:
+            self.result = SimpleNamespace(stdout=stdout, returncode=returncode)
+
+        async def run(self, *args: str, **kw: Any) -> Any:
+            assert args == ("info", "--format", "{{json .NCPU}}")
+            return self.result
+
+    def policy(capability: Capability) -> Any:
+        return WorkerPolicy(capability, "sha256:" + "a" * 64, ("python",), 1, 1, development_image=True)
+
+    cpu = policy(Capability.ASR_CPU)
+    assert asyncio.run(bootstrap._cpu_policy(InfoCli("12\n"), cpu)).cpus == 12.0
+    for unreadable in (InfoCli("garbage"), InfoCli("12", returncode=1), InfoCli("0"), InfoCli('"12"')):
+        assert asyncio.run(bootstrap._cpu_policy(unreadable, cpu)) is cpu  # the default one CPU
+    media = policy(Capability.MEDIA)
+    assert asyncio.run(bootstrap._cpu_policy(InfoCli("12"), media)) is media

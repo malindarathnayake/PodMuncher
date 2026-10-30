@@ -1902,6 +1902,28 @@ async def _image_listed(cli: Any, image: str) -> bool:
     return _repo_digest_listed(result.returncode, result.stdout, image)
 
 
+async def _engine_cpus(cli: Any) -> int | None:
+    """The Docker engine's CPU count (``docker info`` NCPU), or None when unreadable."""
+    result = await cli.run("info", "--format", "{{json .NCPU}}", owner=f"info-{uuid.uuid4().hex}", timeout=15)
+    try:
+        count = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        return None
+    return count if not result.returncode and type(count) is int and 1 <= count <= 64 else None
+
+
+async def _cpu_policy(cli: Any, policy: Any) -> Any:
+    """CPU transcription gets every CPU the Docker engine has; other workers keep one.
+
+    ``--cpus`` above the engine's count is refused by Docker, so the count is read from
+    the engine (Docker Desktop's VM may have fewer CPUs than the host).
+    """
+    if policy.capability is not Capability.ASR_CPU:
+        return policy
+    cpus = await _engine_cpus(cli)
+    return replace(policy, cpus=float(cpus)) if cpus else policy
+
+
 async def _require_image(cli: Any, image: str, *, development: bool) -> None:
     """The exact image must already be present locally (never a pull), else a closed failure.
 
@@ -2549,6 +2571,7 @@ class _ProbeEvidence:
             entry, resolved, gpu = await self._resolve(capability)
             wanted = resolved.capability
             backend = Backend.CUDA if wanted is Capability.ASR_CUDA else Backend.CPU
+            await self._pull_missing(entry, manual_backing)
             await self._verify(resolved.worker_policy.image)
             job_id, attempt_id = job_id or str(uuid.uuid4()), attempt_id or str(uuid.uuid4())
             index = scratch if scratch is not None else self._ctx.scratch
@@ -2583,6 +2606,29 @@ class _ProbeEvidence:
                 if not failed and outcome is not ReasonCode.OK:
                     raise ModelPolicyError(_closed_probe_reason(outcome))
             return evidence
+
+    async def _pull_missing(self, entry: Any, manual_backing: str | None) -> None:
+        """Pull the release image a probe needs when this machine does not have it yet.
+
+        An upgrade changes the image digests, so the first job after it would otherwise
+        fail until setup ran again.  ``pull_image`` returns at once for a present image; a
+        development manifest never pulls.  Pull failures become closed ``ModelPolicyError``
+        reasons.  The caller holds the probe lock.
+        """
+        from .model_policy import ModelPolicyError
+        from .runtime import RuntimeFailure
+
+        manifest = self._ctx.manifest
+        if manifest is None or manifest.development_fixture:
+            return
+        limits = self._ctx.config.limits
+        timeout = min(float(limits.download_timeout_seconds), SETUP_PULL_TIMEOUT_SECONDS)
+        growth = _image_growth(entry.compressed_bytes, entry.unpacked_peak_bytes)
+        try:
+            await self._launch.pull_image(_release_image(entry), growth=growth, timeout=timeout,
+                                          manual_backing=manual_backing)
+        except RuntimeFailure as error:
+            raise ModelPolicyError(error.reason_code) from None
 
     async def _verify(self, image: str) -> None:
         from .model_policy import ModelPolicyError
@@ -2629,9 +2675,10 @@ class _ProbeEvidence:
         from .runtime import WorkerMounts
 
         async with self._lock:
-            _entry, resolved, _gpu = await self._resolve(capability)
+            entry, resolved, _gpu = await self._resolve(capability)
             wanted = resolved.capability
             backend = Backend.CUDA if wanted is Capability.ASR_CUDA else Backend.CPU
+            await self._pull_missing(entry, manual_backing)
             await self._verify(resolved.worker_policy.image)
             ctx = self._ctx
             limits = ctx.config.limits
@@ -2873,6 +2920,7 @@ class DockerWorkerLauncher:
             present = policy.development_image or await _image_listed(cli, policy.image)
             if present:
                 policy = _no_pull_policy(policy)
+            policy = await _cpu_policy(cli, policy)
             growth = replace(growth, model_partial=0, model_unpacked=0,
                              **({"image_compressed": 0, "image_unpacked": 0} if present else {}))
             paths = {"scratch": mounts.scratch, "cache": Path(ctx.config.paths.cache),
